@@ -1,0 +1,3 @@
+# HTML report directory
+# Human-readable OpenSCAP reports are stored here
+# Run: make openscap

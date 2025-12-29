@@ -1,0 +1,65 @@
+{
+    "bash.x86_64": {
+        "name": "bash",
+        "epoch": "0",
+        "version": "5.1.8",
+        "release": "9.el9",
+        "arch": "x86_64"
+    },
+    "coreutils.x86_64": {
+        "name": "coreutils",
+        "epoch": "0",
+        "version": "8.32",
+        "release": "35.el9",
+        "arch": "x86_64"
+    },
+    "kernel.x86_64": {
+        "name": "kernel",
+        "epoch": "0",
+        "version": "5.14.0",
+        "release": "427.18.1.el9_4",
+        "arch": "x86_64"
+    },
+    "openssl.x86_64": {
+        "name": "openssl",
+        "epoch": "1",
+        "version": "3.0.7",
+        "release": "27.el9",
+        "arch": "x86_64"
+    },
+    "openssl-libs.x86_64": {
+        "name": "openssl-libs",
+        "epoch": "1",
+        "version": "3.0.7",
+        "release": "27.el9",
+        "arch": "x86_64"
+    },
+    "glibc.x86_64": {
+        "name": "glibc",
+        "epoch": "0",
+        "version": "2.34",
+        "release": "100.el9",
+        "arch": "x86_64"
+    },
+    "systemd.x86_64": {
+        "name": "systemd",
+        "epoch": "0",
+        "version": "252",
+        "release": "32.el9",
+        "arch": "x86_64"
+    },
+    "zlib.x86_64": {
+        "name": "zlib",
+        "epoch": "0",
+        "version": "1.2.11",
+        "release": "40.el9",
+        "arch": "x86_64"
+    },
+    "curl.x86_64": {
+        "name": "curl",
+        "epoch": "0",
+        "version": "7.76.1",
+        "release": "29.el9",
+        "arch": "x86_64"
+    }
+}

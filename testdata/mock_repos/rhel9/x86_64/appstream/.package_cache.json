@@ -1,0 +1,51 @@
+{
+    "python3.x86_64": {
+        "name": "python3",
+        "epoch": "0",
+        "version": "3.9.18",
+        "release": "3.el9",
+        "arch": "x86_64"
+    },
+    "httpd.x86_64": {
+        "name": "httpd",
+        "epoch": "0",
+        "version": "2.4.57",
+        "release": "8.el9",
+        "arch": "x86_64"
+    },
+    "podman.x86_64": {
+        "name": "podman",
+        "epoch": "4",
+        "version": "4.9.4",
+        "release": "1.el9",
+        "arch": "x86_64"
+    },
+    "git.x86_64": {
+        "name": "git",
+        "epoch": "0",
+        "version": "2.43.0",
+        "release": "1.el9",
+        "arch": "x86_64"
+    },
+    "vim-enhanced.x86_64": {
+        "name": "vim-enhanced",
+        "epoch": "2",
+        "version": "8.2.2637",
+        "release": "20.el9",
+        "arch": "x86_64"
+    },
+    "nginx.x86_64": {
+        "name": "nginx",
+        "epoch": "1",
+        "version": "1.24.0",
+        "release": "4.el9",
+        "arch": "x86_64"
+    },
+    "nodejs.x86_64": {
+        "name": "nodejs",
+        "epoch": "1",
+        "version": "18.19.0",
+        "release": "1.el9",
+        "arch": "x86_64"
+    }
+}

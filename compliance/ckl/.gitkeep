@@ -1,0 +1,3 @@
+# STIG Checklist directory
+# CKL, CSV, and JSON checklist files are stored here
+# Run: make generate-ckl

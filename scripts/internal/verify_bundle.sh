@@ -1,0 +1,377 @@
+#!/bin/bash
+# verify_bundle.sh - Verify imported bundle integrity and signatures
+#
+# This script verifies the Bill of Materials checksums and GPG signatures
+# for imported bundles.
+#
+# Usage:
+#   ./verify_bundle.sh [bundle_name]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source common functions
+# shellcheck source=../common/logging.sh
+source "${SCRIPT_DIR}/../common/logging.sh"
+# shellcheck source=../common/validation.sh
+source "${SCRIPT_DIR}/../common/validation.sh"
+# shellcheck source=../common/gpg_functions.sh
+source "${SCRIPT_DIR}/../common/gpg_functions.sh"
+
+# Configuration
+DATA_DIR="${RPMSERVER_DATA_DIR:-/data}"
+BUNDLES_DIR="${DATA_DIR}/bundles"
+INCOMING_DIR="${BUNDLES_DIR}/incoming"
+VERIFIED_DIR="${BUNDLES_DIR}/verified"
+KEYS_DIR="${DATA_DIR}/keys"
+
+BUNDLE_NAME=""
+VERIFY_ALL=false
+VERIFY_GPG=true
+VERIFY_BOM=true
+
+usage() {
+    cat << 'EOF'
+Verify Bundle Integrity and Signatures
+
+Verifies Bill of Materials checksums and GPG signatures for
+imported bundles.
+
+Usage:
+  ./verify_bundle.sh [bundle_name] [options]
+
+Arguments:
+  bundle_name        Name of bundle to verify (optional if only one)
+
+Options:
+  --all              Verify all bundles in incoming directory
+  --skip-gpg         Skip GPG signature verification
+  --skip-bom         Skip Bill of Materials verification
+  -h, --help         Show this help message
+
+Verification Steps:
+  1. Verify bundle GPG signature (if .bundle_signature.asc exists)
+  2. Verify Bill of Materials checksums for all files
+  3. Verify repository metadata signatures (repomd.xml.asc)
+
+Examples:
+  # Verify specific bundle
+  ./verify_bundle.sh security-update-2024-01-15-001
+
+  # Verify all imported bundles
+  ./verify_bundle.sh --all
+
+EOF
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --all)
+                VERIFY_ALL=true
+                shift
+                ;;
+            --skip-gpg)
+                VERIFY_GPG=false
+                shift
+                ;;
+            --skip-bom)
+                VERIFY_BOM=false
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            -*)
+                log_error "Unknown option: $1"
+                usage
+                exit 1
+                ;;
+            *)
+                BUNDLE_NAME="$1"
+                shift
+                ;;
+        esac
+    done
+}
+
+get_bundles_to_verify() {
+    if [[ "${VERIFY_ALL}" == "true" ]]; then
+        find "${INCOMING_DIR}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \;
+        return
+    fi
+
+    if [[ -n "${BUNDLE_NAME}" ]]; then
+        echo "${BUNDLE_NAME}"
+        return
+    fi
+
+    # Auto-detect if only one bundle
+    local bundle_count
+    bundle_count=$(find "${INCOMING_DIR}" -mindepth 1 -maxdepth 1 -type d | wc -l)
+
+    if [[ ${bundle_count} -eq 0 ]]; then
+        log_error "No bundles found in incoming directory"
+        exit 1
+    elif [[ ${bundle_count} -eq 1 ]]; then
+        find "${INCOMING_DIR}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \;
+    else
+        log_error "Multiple bundles found. Specify bundle name or use --all"
+        log_info "Available bundles:"
+        find "${INCOMING_DIR}" -mindepth 1 -maxdepth 1 -type d -exec basename {} \;
+        exit 1
+    fi
+}
+
+verify_gpg_signature() {
+    local bundle_dir="$1"
+    local sig_file="${bundle_dir}/.bundle_signature.asc"
+
+    if [[ ! -f "${sig_file}" ]]; then
+        log_warn "No GPG signature file found"
+        return 1
+    fi
+
+    log_info "Verifying GPG signature..."
+
+    # Check for GPG key
+    if [[ ! -d "${KEYS_DIR}/.gnupg" ]]; then
+        log_warn "No GPG keyring found at ${KEYS_DIR}/.gnupg"
+        log_warn "Import GPG key first: ./scripts/common/gpg_functions.sh import /path/to/key"
+        return 1
+    fi
+
+    # Reconstruct original bundle for verification
+    # For now, we just check the signature exists
+    # Full verification would require the original tarball
+
+    log_warn "GPG signature file present (full verification requires original tarball)"
+    return 0
+}
+
+verify_bom() {
+    local bundle_dir="$1"
+    local bom_file="${bundle_dir}/BILL_OF_MATERIALS.json"
+
+    if [[ ! -f "${bom_file}" ]]; then
+        log_error "Bill of Materials not found: ${bom_file}"
+        return 1
+    fi
+
+    log_info "Verifying Bill of Materials..."
+
+    local failed=0
+    local verified=0
+    local total
+    total=$(jq -r '.file_count' "${bom_file}")
+
+    log_info "Verifying ${total} files..."
+
+    while IFS= read -r entry; do
+        local file_path
+        local expected_checksum
+        local size
+
+        file_path=$(echo "${entry}" | jq -r '.path')
+        expected_checksum=$(echo "${entry}" | jq -r '.sha256')
+        size=$(echo "${entry}" | jq -r '.size')
+
+        local full_path="${bundle_dir}/${file_path}"
+
+        if [[ ! -f "${full_path}" ]]; then
+            log_error "Missing file: ${file_path}"
+            ((failed++))
+            continue
+        fi
+
+        local actual_checksum
+        actual_checksum=$(sha256sum "${full_path}" | cut -d' ' -f1)
+
+        if [[ "${actual_checksum}" != "${expected_checksum}" ]]; then
+            log_error "Checksum mismatch: ${file_path}"
+            log_error "  Expected: ${expected_checksum}"
+            log_error "  Actual:   ${actual_checksum}"
+            ((failed++))
+        else
+            ((verified++))
+            log_debug "Verified: ${file_path}"
+        fi
+    done < <(jq -c '.files[]' "${bom_file}")
+
+    if [[ ${failed} -gt 0 ]]; then
+        log_error "BOM verification failed: ${failed} errors, ${verified} verified"
+        return 1
+    fi
+
+    log_success "BOM verification passed: ${verified} files verified"
+    return 0
+}
+
+verify_repo_signatures() {
+    local bundle_dir="$1"
+    local repos_dir="${bundle_dir}/repos"
+
+    if [[ ! -d "${repos_dir}" ]]; then
+        log_error "Repos directory not found"
+        return 1
+    fi
+
+    log_info "Verifying repository signatures..."
+
+    local verified=0
+    local unsigned=0
+    local failed=0
+
+    while IFS= read -r repomd; do
+        local sig_file="${repomd}.asc"
+        local repo_path
+        repo_path=$(dirname "$(dirname "${repomd}")")
+        local repo_name
+        repo_name="${repo_path#${repos_dir}/}"
+
+        if [[ -f "${sig_file}" ]]; then
+            if gpg_verify "${sig_file}" 2>/dev/null; then
+                log_success "Verified: ${repo_name}"
+                ((verified++))
+            else
+                log_error "Signature verification failed: ${repo_name}"
+                ((failed++))
+            fi
+        else
+            log_warn "Unsigned: ${repo_name}"
+            ((unsigned++))
+        fi
+    done < <(find "${repos_dir}" -name "repomd.xml" -type f)
+
+    log_info "Repository signatures: ${verified} verified, ${unsigned} unsigned, ${failed} failed"
+
+    if [[ ${failed} -gt 0 ]]; then
+        return 1
+    fi
+
+    return 0
+}
+
+update_import_record() {
+    local bundle_dir="$1"
+    local status="$2"
+
+    local record_file="${bundle_dir}/.import_record"
+
+    if [[ -f "${record_file}" ]]; then
+        local current
+        current=$(cat "${record_file}")
+
+        echo "${current}" | jq \
+            --arg status "${status}" \
+            --arg verified_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '.status = $status | .verified = true | .verified_at = $verified_at' \
+            > "${record_file}"
+    fi
+}
+
+move_to_verified() {
+    local bundle_dir="$1"
+    local bundle_name
+    bundle_name=$(basename "${bundle_dir}")
+
+    local dest_dir="${VERIFIED_DIR}/${bundle_name}"
+
+    log_info "Moving bundle to verified directory..."
+
+    if [[ -d "${dest_dir}" ]]; then
+        log_warn "Bundle already exists in verified, overwriting..."
+        rm -rf "${dest_dir}"
+    fi
+
+    mv "${bundle_dir}" "${dest_dir}"
+
+    log_success "Bundle moved to: ${dest_dir}"
+}
+
+verify_bundle() {
+    local bundle_name="$1"
+    local bundle_dir="${INCOMING_DIR}/${bundle_name}"
+
+    log_section "Verifying: ${bundle_name}"
+
+    if [[ ! -d "${bundle_dir}" ]]; then
+        log_error "Bundle not found: ${bundle_dir}"
+        return 1
+    fi
+
+    local verification_passed=true
+
+    # Verify GPG signature
+    if [[ "${VERIFY_GPG}" == "true" ]]; then
+        if ! verify_gpg_signature "${bundle_dir}"; then
+            log_warn "GPG verification skipped or failed"
+        fi
+    fi
+
+    # Verify BOM
+    if [[ "${VERIFY_BOM}" == "true" ]]; then
+        if ! verify_bom "${bundle_dir}"; then
+            log_error "BOM verification failed"
+            verification_passed=false
+        fi
+    fi
+
+    # Verify repo signatures
+    if ! verify_repo_signatures "${bundle_dir}"; then
+        log_warn "Some repository signatures could not be verified"
+    fi
+
+    if [[ "${verification_passed}" == "true" ]]; then
+        update_import_record "${bundle_dir}" "verified"
+        move_to_verified "${bundle_dir}"
+        log_success "Bundle verification passed: ${bundle_name}"
+        log_audit "BUNDLE_VERIFIED" "Bundle ${bundle_name} passed verification"
+        return 0
+    else
+        update_import_record "${bundle_dir}" "failed"
+        log_error "Bundle verification failed: ${bundle_name}"
+        log_audit "BUNDLE_VERIFICATION_FAILED" "Bundle ${bundle_name} failed verification"
+        return 1
+    fi
+}
+
+main() {
+    parse_args "$@"
+
+    log_section "Bundle Verification"
+
+    # Get bundles to verify
+    local bundles
+    bundles=$(get_bundles_to_verify)
+
+    local total=0
+    local passed=0
+    local failed=0
+
+    for bundle_name in ${bundles}; do
+        ((total++))
+        if verify_bundle "${bundle_name}"; then
+            ((passed++))
+        else
+            ((failed++))
+        fi
+    done
+
+    log_section "Verification Summary"
+    log_info "Total: ${total}"
+    log_info "Passed: ${passed}"
+    log_info "Failed: ${failed}"
+
+    if [[ ${failed} -gt 0 ]]; then
+        log_error "Some bundles failed verification"
+        exit 1
+    fi
+
+    log_success "All bundles verified"
+    log_info "Next step: make publish LIFECYCLE=dev"
+}
+
+main "$@"

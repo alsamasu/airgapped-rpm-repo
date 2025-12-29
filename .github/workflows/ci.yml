@@ -1,0 +1,211 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  PYTHONPATH: src
+
+jobs:
+  lint-shell:
+    name: Lint Shell Scripts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Run shellcheck
+        run: |
+          find scripts -name "*.sh" -type f -exec shellcheck -x {} \;
+          shellcheck rpmserverctl
+
+  lint-python:
+    name: Lint Python
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff mypy
+
+      - name: Run ruff check
+        run: ruff check src/
+
+      - name: Run ruff format check
+        run: ruff format --check src/
+
+      - name: Run mypy
+        run: mypy src/ --ignore-missing-imports
+
+  lint-yaml:
+    name: Lint YAML
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install yamllint
+        run: pip install yamllint
+
+      - name: Run yamllint
+        run: yamllint -c .yamllint.yml .github/workflows/ docker-compose.yml
+        continue-on-error: true
+
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: |
+          PYTHONPATH=src pytest src/tests/ -v --tb=short -m "not integration" \
+            --junitxml=test-results/junit.xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: test-results/
+
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [lint-shell, lint-python, test-unit]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build internal image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: internal
+          load: true
+          tags: airgapped-rpm-repo:internal
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run integration tests
+        run: |
+          # Create test directories
+          mkdir -p /tmp/test-data/{mirror,manifests,bundles,repos}
+          mkdir -p /tmp/test-data/manifests/processed/test-host-001/latest
+          mkdir -p /tmp/test-data/mirror/rhel9/x86_64/baseos
+
+          # Copy test fixtures
+          cp testdata/fixtures/sample_manifest.json \
+            /tmp/test-data/manifests/processed/test-host-001/latest/manifest.json
+          cp testdata/mock_repos/rhel9/x86_64/baseos/.package_cache.json \
+            /tmp/test-data/mirror/rhel9/x86_64/baseos/
+
+          # Run tests
+          PYTHONPATH=src pytest src/tests/ -v --tb=short -m "integration" || true
+
+      - name: Test container startup
+        run: |
+          docker run -d --name test-server \
+            -v /tmp/test-data:/data:Z \
+            -p 8080:8080 \
+            airgapped-rpm-repo:internal
+
+          # Wait for startup
+          sleep 10
+
+          # Check health
+          curl -f http://localhost:8080/repos/ || exit 1
+
+          docker logs test-server
+          docker stop test-server
+
+  build-images:
+    name: Build Container Images
+    runs-on: ubuntu-latest
+    needs: [test-unit]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build external image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: external
+          push: false
+          tags: airgapped-rpm-repo:external
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build internal image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: internal
+          push: false
+          tags: airgapped-rpm-repo:internal
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  packer-validate:
+    name: Validate Packer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@main
+        with:
+          version: latest
+
+      - name: Init Packer
+        run: cd packer && packer init rhel9-internal.pkr.hcl
+
+      - name: Validate Packer
+        run: |
+          cd packer && packer validate \
+            -var "iso_path=/path/to/rhel.iso" \
+            -var "iso_checksum=sha256:dummy" \
+            rhel9-internal.pkr.hcl

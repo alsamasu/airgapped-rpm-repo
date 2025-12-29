@@ -1,0 +1,38 @@
+# Example Packer variables file for RHEL 9 Internal Publisher OVA
+#
+# Copy this file to variables.pkrvars.hcl and customize for your environment:
+#   cp variables.pkrvars.hcl.example variables.pkrvars.hcl
+#
+# Then run Packer with:
+#   packer build -var-file=variables.pkrvars.hcl rhel9-internal.pkr.hcl
+
+# Path to RHEL 9.6 installation ISO
+# Download from: https://access.redhat.com/downloads/content/rhel
+iso_path = "/path/to/rhel-9.6-x86_64-dvd.iso"
+
+# SHA256 checksum of the ISO (format: sha256:...)
+# Verify with: sha256sum rhel-9.6-x86_64-dvd.iso
+iso_checksum = "sha256:your_iso_checksum_here"
+
+# Build version (used in OVA naming)
+version = "1.0.0"
+
+# Virtual machine name
+vm_name = "rhel9-internal-publisher"
+
+# Hardware configuration
+cpus     = 2
+memory   = 4096       # MB
+disk_size = 102400    # MB (100GB for OS)
+data_disk_size = 204800  # MB (200GB for /data)
+
+# SSH credentials for provisioning
+# IMPORTANT: Change these for production!
+ssh_username = "root"
+ssh_password = "changeme"
+
+# Build in headless mode (no GUI)
+headless = true
+
+# Output directory for OVA file
+output_directory = "output"
