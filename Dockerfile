@@ -1,16 +1,17 @@
 # Airgapped RPM Repository Server
 # Multi-stage build for both external and internal modes
 
-FROM registry.access.redhat.com/ubi9/ubi:9.4 AS base
+FROM almalinux:9 AS base
 
 LABEL maintainer="DevSecOps Team"
 LABEL description="Airgapped Two-Tier RPM Repository System"
 LABEL version="1.0.0"
 
-# Install base dependencies
-RUN dnf install -y --setopt=tsflags=nodocs \
+# Enable CRB repo for createrepo_c and install dependencies
+RUN dnf install -y --setopt=tsflags=nodocs dnf-plugins-core \
+    && dnf config-manager --set-enabled crb \
+    && dnf install -y --setopt=tsflags=nodocs \
     createrepo_c \
-    dnf-plugins-core \
     gnupg2 \
     httpd \
     mod_ssl \
@@ -18,7 +19,6 @@ RUN dnf install -y --setopt=tsflags=nodocs \
     python3-pip \
     python3-dnf \
     python3-rpm \
-    python3-createrepo_c \
     rsync \
     tar \
     gzip \

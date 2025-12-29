@@ -5,12 +5,14 @@ Main module for computing available package updates by comparing
 installed packages from host manifests against mirrored repository content.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator, Optional
+from typing import Any, Iterator, Optional, Union
 
 from .rpm_utils import compare_versions, is_update_available, format_evr
 

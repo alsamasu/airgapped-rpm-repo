@@ -5,10 +5,12 @@ Provides utilities for parsing and comparing RPM package versions.
 Handles NEVRA (Name-Epoch-Version-Release-Arch) format and version comparison.
 """
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass
 from functools import total_ordering
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 
 @total_ordering
@@ -229,14 +231,15 @@ def parse_nevra(nevra_string: str) -> Optional[RPMVersion]:
     Returns:
         RPMVersion object or None if parsing fails
     """
-    # Pattern for NEVRA with epoch
+    # Pattern for NEVRA with epoch: name-epoch:version-release.arch
+    # release can contain dots (e.g., "24.el9"), arch is the last segment
     pattern_with_epoch = re.compile(
-        r"^(.+)-(\d+):([^-]+)-([^.]+)\.(.+)$"
+        r"^(.+)-(\d+):([^-]+)-(.+)\.([^.]+)$"
     )
 
     # Pattern for NEVRA without epoch (name-version-release.arch)
     pattern_without_epoch = re.compile(
-        r"^(.+)-([^-]+)-([^.]+)\.(.+)$"
+        r"^(.+)-([^-]+)-(.+)\.([^.]+)$"
     )
 
     # Try with epoch first
