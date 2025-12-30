@@ -16,6 +16,152 @@ All automation artifacts reside in the repository under `automation/powercli/` a
 
 ---
 
+## Prerequisites
+
+### Operator Workstation Requirements
+
+The deployment automation can be run from Windows, Linux, or macOS. Install the required software for your platform:
+
+#### Windows 11 (Recommended)
+
+1. **PowerShell 5.1+** (included with Windows 11)
+
+2. **VMware PowerCLI Module**
+   ```powershell
+   Install-Module -Name VMware.PowerCLI -Scope CurrentUser -Force
+   Set-PowerCLIConfiguration -InvalidCertificateAction Ignore -Confirm:$false
+   ```
+
+3. **PowerShell YAML Module** (for configuration parsing)
+   ```powershell
+   Install-Module -Name powershell-yaml -Scope CurrentUser -Force
+   ```
+
+4. **Windows ADK** (for ISO creation)
+   - Download from [Microsoft Windows ADK](https://learn.microsoft.com/en-us/windows-hardware/get-started/adk-install)
+   - Install "Deployment Tools" component (includes `oscdimg.exe`)
+
+5. **Python 3** (for inventory rendering)
+   ```powershell
+   winget install Python.Python.3.12
+   pip install pyyaml
+   ```
+
+#### Linux / macOS
+
+1. **PowerShell Core**
+   ```bash
+   # RHEL/CentOS
+   sudo dnf install -y powershell
+
+   # Ubuntu/Debian
+   sudo apt-get install -y powershell
+
+   # macOS
+   brew install powershell
+   ```
+
+2. **VMware PowerCLI Module**
+   ```bash
+   pwsh -Command "Install-Module -Name VMware.PowerCLI -Scope CurrentUser -Force"
+   ```
+
+3. **ISO creation tools**
+   ```bash
+   # RHEL/CentOS
+   sudo dnf install -y genisoimage
+
+   # Ubuntu/Debian
+   sudo apt-get install -y genisoimage
+
+   # macOS
+   brew install cdrtools
+   ```
+
+4. **Python 3 with PyYAML**
+   ```bash
+   sudo dnf install -y python3 python3-pyyaml  # RHEL
+   sudo apt-get install -y python3 python3-yaml  # Debian
+   ```
+
+5. **Make** (optional, for using Makefile targets)
+   ```bash
+   sudo dnf install -y make  # RHEL
+   sudo apt-get install -y make  # Debian
+   ```
+
+### VMware Environment
+
+- vCenter Server 7.0+ or ESXi 7.0+ with direct access
+- VM deployment permissions
+- Datastore with sufficient space (500GB+ recommended)
+- Network port group with DHCP enabled
+
+### Credentials
+
+Set VMware credentials via environment variables:
+
+**Windows PowerShell:**
+```powershell
+$env:VMWARE_USER = "administrator@vsphere.local"
+$env:VMWARE_PASSWORD = "YourPassword"
+```
+
+**Linux/macOS:**
+```bash
+export VMWARE_USER="administrator@vsphere.local"
+export VMWARE_PASSWORD="YourPassword"
+```
+
+---
+
+## Windows PowerShell Commands
+
+Windows operators can run PowerShell scripts directly instead of using `make` targets.
+
+| Make Command | Windows PowerShell Equivalent |
+|--------------|------------------------------|
+| `make vsphere-discover` | `.\automation\powercli\discover-vsphere-defaults.ps1 -OutputDir automation\artifacts` |
+| `make spec-init` | Run discover, then: `Copy-Item automation\artifacts\spec.detected.yaml config\spec.yaml` |
+| `make validate-spec` | `.\automation\powercli\validate-spec.ps1 -SpecPath config\spec.yaml` |
+| `make generate-ks-iso` | `.\automation\powercli\generate-ks-iso.ps1 -SpecPath config\spec.yaml -OutputDir output\ks-isos` |
+| `make servers-deploy` | `.\automation\powercli\deploy-rpm-servers.ps1 -SpecPath config\spec.yaml` |
+| `make servers-wait` | `.\automation\powercli\wait-for-install-complete.ps1 -SpecPath config\spec.yaml` |
+| `make servers-report` | `.\automation\powercli\wait-for-dhcp-and-report.ps1 -SpecPath config\spec.yaml` |
+| `make servers-destroy` | `.\automation\powercli\destroy-rpm-servers.ps1 -SpecPath config\spec.yaml` |
+| `make build-ovas` | `.\automation\powercli\build-ovas.ps1 -SpecPath config\spec.yaml -OutputDir automation\artifacts\ovas` |
+
+**Example: Full Windows Deployment**
+```powershell
+# Set credentials
+$env:VMWARE_USER = "administrator@vsphere.local"
+$env:VMWARE_PASSWORD = "YourPassword"
+
+# Discover vSphere environment
+.\automation\powercli\discover-vsphere-defaults.ps1 -OutputDir automation\artifacts
+
+# Copy and edit spec.yaml
+Copy-Item automation\artifacts\spec.detected.yaml config\spec.yaml
+notepad config\spec.yaml  # Edit with your values
+
+# Validate configuration
+.\automation\powercli\validate-spec.ps1 -SpecPath config\spec.yaml
+
+# Generate kickstart ISOs
+.\automation\powercli\generate-ks-iso.ps1 -SpecPath config\spec.yaml -OutputDir output\ks-isos
+
+# Deploy VMs
+.\automation\powercli\deploy-rpm-servers.ps1 -SpecPath config\spec.yaml
+
+# Wait for installation
+.\automation\powercli\wait-for-install-complete.ps1 -SpecPath config\spec.yaml
+
+# Get IP addresses
+.\automation\powercli\wait-for-dhcp-and-report.ps1 -SpecPath config\spec.yaml
+```
+
+---
+
 ## Deployment Inputs
 
 ### Required Files
