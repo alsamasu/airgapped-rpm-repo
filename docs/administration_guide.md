@@ -53,7 +53,12 @@ ssh admin@<internal-ip> "journalctl --user -M rpmops@ -u airgap-rpm-publisher.se
 ### Run Onboarding Playbook
 
 ```bash
-make ansible-onboard INVENTORY=inventories/lab.yml LIMIT=new-host
+make ansible-onboard INVENTORY=ansible/inventories/lab.yml
+```
+
+To limit to specific hosts, run the playbook directly:
+```bash
+cd ansible && ansible-playbook -i inventories/lab.yml playbooks/onboard_hosts.yml --limit new-host
 ```
 
 ### Onboarding Tags
@@ -72,7 +77,7 @@ make ansible-onboard INVENTORY=inventories/lab.yml LIMIT=new-host
 ## Manifest Collection
 
 ```bash
-make manifests INVENTORY=inventories/lab.yml
+make manifests INVENTORY=ansible/inventories/lab.yml
 ```
 
 ---
@@ -101,13 +106,13 @@ ssh admin@<external-ip> "sudo /opt/airgap-rpm/scripts/external/export_bundle.sh"
 ### Import Bundle (Internal Server)
 
 ```bash
-make import BUNDLE=/var/lib/airgap-rpm/import/bundle-YYYYMMDD
+make import BUNDLE_PATH=/var/lib/airgap-rpm/import/bundle-YYYYMMDD.tar.gz
 ```
 
 ### Promote from Testing to Stable
 
 ```bash
-make promote
+make promote FROM=testing TO=stable
 ```
 
 ---
@@ -115,7 +120,7 @@ make promote
 ## Monthly Patch Cycle
 
 ```bash
-make patch INVENTORY=inventories/lab.yml
+make patch INVENTORY=ansible/inventories/lab.yml
 ```
 
 ---
