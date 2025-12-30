@@ -1,0 +1,78 @@
+# ansible/inventories/lab.yml
+# Lab environment inventory for VMware-based test VMs
+#
+# Successfully tested: 2025-12-30
+# All 9 autonomous tests passed
+
+all:
+  vars:
+    ansible_user: admin
+    ansible_password: testpassword
+    ansible_become: yes
+    ansible_become_password: testpassword
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+
+    # Repository settings - using HTTP for lab
+    internal_repo_host: 192.168.1.236
+    internal_repo_https_port: 80
+    internal_repo_url: "http://192.168.1.236"
+    repo_lifecycle_env: stable
+
+    # Syslog settings (required but disabled for lab)
+    syslog_tls_target_host: 192.168.1.236
+    syslog_tls_target_port: 6514
+    syslog_tls_ca_bundle_path: /etc/pki/tls/certs/syslog-ca.crt
+    onboard_configure_syslog: false
+
+    # Onboarding settings
+    onboard_disable_external_repos: false
+    connectivity_retry_count: 2
+    connectivity_retry_delay: 3
+    preflight_check_disk_space_mb: 500
+
+  children:
+    # External RPM server (syncs from internet)
+    external_servers:
+      hosts:
+        rpm-external:
+          ansible_host: 192.168.1.160
+          airgap_host_id: rpm-external-01
+
+    # Internal RPM server (airgapped, receives from external)
+    internal_servers:
+      hosts:
+        rpm-internal:
+          ansible_host: 192.168.1.236
+          airgap_host_id: rpm-internal-01
+
+    # Managed RHEL 9 hosts
+    rhel9_hosts:
+      vars:
+        ansible_python_interpreter: /usr/bin/python3
+        repo_profile: rhel9
+      hosts:
+        rhel9-host:
+          ansible_host: 192.168.1.67
+          airgap_host_id: rhel9-host-01
+
+    # Managed RHEL 8 hosts
+    rhel8_hosts:
+      vars:
+        ansible_python_interpreter: /usr/bin/python3.11
+        repo_profile: rhel8
+      hosts:
+        rhel8-host:
+          ansible_host: 192.168.1.3
+          airgap_host_id: rhel8-host-01
+
+    # All managed hosts
+    managed_hosts:
+      children:
+        rhel9_hosts:
+        rhel8_hosts:
+
+    # All RPM servers
+    rpm_servers:
+      children:
+        external_servers:
+        internal_servers:
