@@ -1,39 +1,22 @@
-# ansible/inventories/e2e_hosts.yml
-# E2E test inventory for onboarding playbook testing
-#
-# Targets the E2E test containers on internal-e2e-net network.
-# Password: testpassword (for both root and testuser)
-
 all:
   vars:
-    # SSH connection settings
     ansible_user: root
     ansible_password: testpassword
-    ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
-    
-    # Internal repository settings (E2E containers)
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
     internal_repo_host: e2e-rpm-publisher
     internal_repo_https_port: 8443
     internal_repo_url: "https://{{ internal_repo_host }}:{{ internal_repo_https_port }}"
-    
-    # Syslog TLS forwarding
     syslog_tls_target_host: e2e-syslog-sink
     syslog_tls_target_port: 6514
     syslog_tls_ca_bundle_path: /etc/pki/tls/certs/syslog-ca.crt
-    
-    # Lifecycle environment
     repo_lifecycle_env: testing
-    
-    # Onboarding settings
     preflight_check_connectivity: false
     onboard_disable_external_repos: true
-    
   children:
     managed_hosts:
       children:
         rhel9_hosts: {}
         rhel8_hosts: {}
-        
     rhel9_hosts:
       vars:
         ansible_python_interpreter: /usr/bin/python3
@@ -42,10 +25,9 @@ all:
         e2e-ssh-ubi9:
           ansible_host: e2e-ssh-ubi9
           airgap_host_id: e2e-test-ubi9-01
-          
     rhel8_hosts:
       vars:
-        ansible_python_interpreter: /usr/bin/python3
+        ansible_python_interpreter: /usr/bin/python3.11
         repo_profile: rhel8
       hosts:
         e2e-ssh-ubi8:
