@@ -1,0 +1,21 @@
+# Python dependencies for Airgapped RPM Repository System
+# Pin versions for reproducibility
+
+# Testing
+pytest>=7.4.0,<8.0.0
+pytest-cov>=4.1.0,<5.0.0
+pytest-mock>=3.12.0,<4.0.0
+
+# Linting and formatting
+ruff>=0.1.0,<1.0.0
+mypy>=1.7.0,<2.0.0
+
+# Type stubs
+types-PyYAML>=6.0.0
+
+# Core dependencies
+PyYAML>=6.0.1,<7.0.0
+Jinja2>=3.1.2,<4.0.0
+
+# RPM version parsing
+packaging>=23.0,<24.0

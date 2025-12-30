@@ -1,0 +1,100 @@
+{
+    "manifest_version": "1.0",
+    "script_version": "1.0.0",
+    "host_id": "test-host-001",
+    "hostname": "test-server.internal.local",
+    "timestamp": "2024-01-15T10:00:00Z",
+    "os_release": {
+        "id": "rhel",
+        "version": "9.6"
+    },
+    "kernel": "5.14.0-427.13.1.el9_4.x86_64",
+    "arch": "x86_64",
+    "packages": [
+        {
+            "name": "bash",
+            "epoch": "0",
+            "version": "5.1.8",
+            "release": "6.el9",
+            "arch": "x86_64",
+            "installtime": 1705313000
+        },
+        {
+            "name": "coreutils",
+            "epoch": "0",
+            "version": "8.32",
+            "release": "34.el9",
+            "arch": "x86_64",
+            "installtime": 1705313000
+        },
+        {
+            "name": "kernel",
+            "epoch": "0",
+            "version": "5.14.0",
+            "release": "427.13.1.el9_4",
+            "arch": "x86_64",
+            "installtime": 1705313000
+        },
+        {
+            "name": "openssl",
+            "epoch": "1",
+            "version": "3.0.7",
+            "release": "24.el9",
+            "arch": "x86_64",
+            "installtime": 1705313000
+        },
+        {
+            "name": "openssl-libs",
+            "epoch": "1",
+            "version": "3.0.7",
+            "release": "24.el9",
+            "arch": "x86_64",
+            "installtime": 1705313000
+        },
+        {
+            "name": "glibc",
+            "epoch": "0",
+            "version": "2.34",
+            "release": "83.el9",
+            "arch": "x86_64",
+            "installtime": 1705313000
+        },
+        {
+            "name": "systemd",
+            "epoch": "0",
+            "version": "252",
+            "release": "18.el9",
+            "arch": "x86_64",
+            "installtime": 1705313000
+        },
+        {
+            "name": "python3",
+            "epoch": "0",
+            "version": "3.9.18",
+            "release": "1.el9",
+            "arch": "x86_64",
+            "installtime": 1705313000
+        },
+        {
+            "name": "httpd",
+            "epoch": "0",
+            "version": "2.4.57",
+            "release": "5.el9",
+            "arch": "x86_64",
+            "installtime": 1705313000
+        },
+        {
+            "name": "podman",
+            "epoch": "4",
+            "version": "4.6.1",
+            "release": "7.el9",
+            "arch": "x86_64",
+            "installtime": 1705313000
+        }
+    ],
+    "enabled_repos": [
+        "rhel-9-for-x86_64-baseos-rpms",
+        "rhel-9-for-x86_64-appstream-rpms"
+    ],
+    "include_services": false
+}

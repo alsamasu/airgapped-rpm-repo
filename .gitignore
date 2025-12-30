@@ -1,0 +1,119 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+
+# Packer
+packer/output/
+packer/*.auto.pkrvars.hcl
+packer/packer_cache/
+*.ova
+*.vmdk
+*.ovf
+
+# Docker
+docker-compose.override.yml
+
+# Data directories (created at runtime)
+/data/
+mirror/
+bundles/
+manifests/
+keys/
+lifecycle/
+
+# Logs
+*.log
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Secrets and credentials (NEVER commit these)
+*.pem
+*.key
+*.asc
+!RPM-GPG-KEY-*
+.gnupg/
+secrets/
+credentials/
+*.env
+.env.local
+.env.*.local
+
+# Compliance output (generated)
+compliance/arf/*.xml
+compliance/xccdf/*.xml
+compliance/html/*.html
+compliance/ckl/*.ckl
+compliance/ckl/*.csv
+compliance/ckl/*.json
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup
+
+# Archives
+*.tar.gz
+*.tar.xz
+*.zip
+
+# Build artifacts
+output/
+*.rpm
+!tests/fixtures/**/*.rpm

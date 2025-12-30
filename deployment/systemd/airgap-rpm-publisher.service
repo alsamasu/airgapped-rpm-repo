@@ -1,0 +1,57 @@
+# airgap-rpm-publisher.service
+# Rootless Podman systemd user service for RPM Publisher container
+#
+# Installation:
+#   mkdir -p ~/.config/systemd/user
+#   cp airgap-rpm-publisher.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now airgap-rpm-publisher
+#
+# Enable lingering for the rpmops user:
+#   sudo loginctl enable-linger rpmops
+
+[Unit]
+Description=Airgapped RPM Repository Publisher
+Documentation=https://github.com/alsamasu/airgapped-rpm-repo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+TimeoutStartSec=300
+TimeoutStopSec=30
+
+# Environment
+Environment=PODMAN_SYSTEMD_UNIT=%n
+Environment=RPMSERVER_DATA_DIR=/home/rpmops/data
+Environment=RPMSERVER_HTTPS_PORT=8443
+Environment=RPMSERVER_HTTP_PORT=8080
+
+# Pull and run container
+ExecStartPre=-/usr/bin/podman pull localhost/airgap-rpm-publisher:latest
+ExecStartPre=-/usr/bin/podman rm -f airgap-rpm-publisher
+
+ExecStart=/usr/bin/podman run \
+    --name airgap-rpm-publisher \
+    --rm \
+    --replace \
+    --log-driver=journald \
+    --publish 8080:8080 \
+    --publish 8443:8443 \
+    --volume ${RPMSERVER_DATA_DIR}/repos:/data/repos:Z \
+    --volume ${RPMSERVER_DATA_DIR}/lifecycle:/data/lifecycle:Z \
+    --volume ${RPMSERVER_DATA_DIR}/bundles:/data/bundles:Z \
+    --volume ${RPMSERVER_DATA_DIR}/keys:/data/keys:Z \
+    --volume ${RPMSERVER_DATA_DIR}/certs:/data/certs:Z \
+    --env RPMSERVER_HTTPS_PORT=${RPMSERVER_HTTPS_PORT} \
+    --env RPMSERVER_HTTP_PORT=${RPMSERVER_HTTP_PORT} \
+    --env RPMSERVER_MODE=internal \
+    localhost/airgap-rpm-publisher:latest
+
+ExecStop=/usr/bin/podman stop -t 10 airgap-rpm-publisher
+ExecStopPost=-/usr/bin/podman rm -f airgap-rpm-publisher
+
+[Install]
+WantedBy=default.target

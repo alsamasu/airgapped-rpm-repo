@@ -1,0 +1,3 @@
+# XCCDF results directory
+# OpenSCAP XCCDF XML results are stored here after evaluation
+# Run: make openscap

@@ -1,0 +1,3 @@
+# ARF (Asset Reporting Format) results directory
+# OpenSCAP ARF XML files are stored here after evaluation
+# Run: make openscap

@@ -1,0 +1,40 @@
+# testdata/tls-syslog-sink/Containerfile
+# TLS Syslog Sink test container
+#
+# Receives syslog messages over TLS (server-auth only, no mTLS)
+# Used for testing rsyslog TLS forwarding from managed hosts.
+
+FROM almalinux:9
+
+LABEL maintainer="RPM Repository Team"
+LABEL description="TLS Syslog Sink for testing"
+
+# Install rsyslog with TLS support
+RUN dnf install -y --setopt=tsflags=nodocs \
+    rsyslog \
+    rsyslog-gnutls \
+    openssl \
+    procps-ng \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
+# Create directories
+RUN mkdir -p /etc/pki/rsyslog /var/log/remote /var/spool/rsyslog
+
+# Copy configuration and scripts
+COPY rsyslog.conf /etc/rsyslog.conf
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Environment variables for TLS configuration
+ENV SYSLOG_TLS_PORT=6514 \
+    SYSLOG_TCP_PORT=514
+
+# Expose syslog ports
+EXPOSE 514 6514
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=5s --start-period=10s --retries=3 \
+    CMD pgrep rsyslogd || exit 1
+
+ENTRYPOINT ["/entrypoint.sh"]

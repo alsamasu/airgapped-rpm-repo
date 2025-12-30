@@ -1,0 +1,150 @@
+version: "3.8"
+
+services:
+  # External builder - internet-connected mode
+  external-builder:
+    build:
+      context: .
+      target: external
+    image: airgapped-rpm-repo:external
+    container_name: rpm-external-builder
+    hostname: external-builder
+    environment:
+      - RPMSERVER_MODE=external
+      - RPMSERVER_DATA_DIR=/data
+      - RPMSERVER_LOG_DIR=/var/log/rpmserver
+      - TZ=UTC
+    volumes:
+      - external-data:/data
+      - ./scripts:/opt/rpmserver/scripts:ro
+      - ./src:/opt/rpmserver/src:ro
+      - ./testdata:/opt/rpmserver/testdata:ro
+    networks:
+      - external-net
+    profiles:
+      - external
+      - full
+    healthcheck:
+      test: ["CMD", "test", "-d", "/data/mirror"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Internal publisher - airgapped mode with HTTP server
+  internal-publisher:
+    build:
+      context: .
+      target: internal
+    image: airgapped-rpm-repo:internal
+    container_name: rpm-internal-publisher
+    hostname: internal-publisher
+    environment:
+      - RPMSERVER_MODE=internal
+      - RPMSERVER_DATA_DIR=/data
+      - RPMSERVER_LOG_DIR=/var/log/rpmserver
+      - RPMSERVER_HTTP_PORT=8080
+      - RPMSERVER_HTTPS_PORT=8443
+      - RPMSERVER_BASE_URL=http://localhost:8080
+      - TZ=UTC
+    volumes:
+      - internal-data:/data
+      - ./scripts:/opt/rpmserver/scripts:ro
+      - ./src:/opt/rpmserver/src:ro
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+    networks:
+      - internal-net
+    profiles:
+      - internal
+      - full
+      - dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/repos/", "--max-time", "5"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # Development/testing environment
+  dev:
+    build:
+      context: .
+      target: internal
+    image: airgapped-rpm-repo:dev
+    container_name: rpm-dev
+    hostname: rpm-dev
+    environment:
+      - RPMSERVER_MODE=internal
+      - RPMSERVER_DATA_DIR=/data
+      - RPMSERVER_LOG_DIR=/var/log/rpmserver
+      - RPMSERVER_HTTP_PORT=8080
+      - RPMSERVER_BASE_URL=http://localhost:8080
+      - RPMSERVER_DEV_MODE=true
+      - TZ=UTC
+    volumes:
+      - dev-data:/data
+      - ./scripts:/opt/rpmserver/scripts:ro
+      - ./src:/opt/rpmserver/src:ro
+      - ./testdata:/opt/rpmserver/testdata:ro
+    ports:
+      - "8080:8080"
+    networks:
+      - dev-net
+    profiles:
+      - dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/repos/", "--max-time", "5"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Test runner container
+  test-runner:
+    build:
+      context: .
+      target: internal
+    image: airgapped-rpm-repo:test
+    container_name: rpm-test-runner
+    hostname: rpm-test
+    environment:
+      - RPMSERVER_MODE=test
+      - RPMSERVER_DATA_DIR=/data
+      - PYTHONPATH=/opt/rpmserver/src
+    volumes:
+      - ./scripts:/opt/rpmserver/scripts:ro
+      - ./src:/opt/rpmserver/src:ro
+      - ./testdata:/opt/rpmserver/testdata:ro
+      - test-results:/opt/rpmserver/test-results
+    networks:
+      - test-net
+    profiles:
+      - test
+    entrypoint: ["/bin/bash", "-c"]
+    command: ["python3 -m pytest /opt/rpmserver/src/tests/ -v --tb=short --junitxml=/opt/rpmserver/test-results/junit.xml"]
+
+networks:
+  external-net:
+    driver: bridge
+    internal: false
+  internal-net:
+    driver: bridge
+    internal: true
+  dev-net:
+    driver: bridge
+  test-net:
+    driver: bridge
+    internal: true
+
+volumes:
+  external-data:
+    driver: local
+  internal-data:
+    driver: local
+  dev-data:
+    driver: local
+  test-results:
+    driver: local

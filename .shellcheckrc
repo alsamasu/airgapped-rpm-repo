@@ -1,0 +1,15 @@
+# ShellCheck configuration
+# https://www.shellcheck.net/wiki/
+
+# Default shell for scripts without shebang
+shell=bash
+
+# Enable all checks
+enable=all
+
+# Disable specific checks if needed (uncomment as necessary)
+# disable=SC2034  # variable appears unused
+# disable=SC1091  # not following sourced file
+
+# External sources (for sourced files)
+external-sources=true

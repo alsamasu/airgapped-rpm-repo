@@ -1,0 +1,84 @@
+# containers/rpm-publisher/Containerfile
+# RPM Publisher Container with HTTPS and Lifecycle Environments
+#
+# This container serves RPM repositories over HTTPS with support for:
+# - Self-signed certificate bootstrap
+# - CA-signed certificate replacement
+# - Lifecycle environments (testing/stable)
+# - Bundle import, validation, and publishing
+
+FROM almalinux:9
+
+LABEL maintainer="RPM Repository Team"
+LABEL description="Airgapped RPM Repository Publisher with HTTPS"
+
+# Enable CRB repo for createrepo_c and install dependencies
+RUN dnf install -y --setopt=tsflags=nodocs dnf-plugins-core \
+    && dnf config-manager --set-enabled crb \
+    && dnf install -y --setopt=tsflags=nodocs \
+    httpd \
+    mod_ssl \
+    createrepo_c \
+    gnupg2 \
+    python3 \
+    python3-pip \
+    rsync \
+    openssl \
+    jq \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
+# Create non-root user for rootless operation
+RUN useradd -r -u 1001 -g 0 -d /data -s /sbin/nologin rpmops \
+    && mkdir -p /data/repos /data/lifecycle/testing /data/lifecycle/stable \
+    && mkdir -p /data/bundles/incoming /data/bundles/processed \
+    && mkdir -p /data/keys /data/certs \
+    && mkdir -p /var/log/rpmserver \
+    && mkdir -p /run/httpd \
+    && chown -R 1001:0 /data /var/log/rpmserver /run/httpd \
+    && chmod -R g=u /data /var/log/rpmserver /run/httpd
+
+# Configure Apache for HTTPS on non-privileged ports
+RUN sed -i 's/Listen 80/Listen 8080/' /etc/httpd/conf/httpd.conf \
+    && sed -i 's/Listen 443/Listen 8443/' /etc/httpd/conf.d/ssl.conf \
+    && sed -i 's/:443/:8443/g' /etc/httpd/conf.d/ssl.conf \
+    && echo "ServerName localhost" >> /etc/httpd/conf/httpd.conf \
+    # Allow httpd to run as non-root
+    && sed -i 's/^User apache/User rpmops/' /etc/httpd/conf/httpd.conf \
+    && sed -i 's/^Group apache/Group root/' /etc/httpd/conf/httpd.conf \
+    # Fix SSL certificate paths for non-root
+    && sed -i 's|/etc/pki/tls/certs/localhost.crt|/data/certs/server.crt|g' /etc/httpd/conf.d/ssl.conf \
+    && sed -i 's|/etc/pki/tls/private/localhost.key|/data/certs/server.key|g' /etc/httpd/conf.d/ssl.conf \
+    # Set proper permissions
+    && chown -R 1001:0 /etc/httpd/logs /etc/httpd/run \
+    && chmod -R g=u /etc/httpd/logs /etc/httpd/run
+
+# Copy Apache virtual host configuration
+COPY --chown=1001:0 httpd-repos.conf /etc/httpd/conf.d/repos.conf
+
+# Copy scripts
+COPY --chown=1001:0 scripts/ /opt/rpmserver/
+RUN chmod +x /opt/rpmserver/*.sh
+
+# Environment variables
+ENV RPMSERVER_DATA_DIR=/data \
+    RPMSERVER_LOG_DIR=/var/log/rpmserver \
+    RPMSERVER_HTTP_PORT=8080 \
+    RPMSERVER_HTTPS_PORT=8443 \
+    RPMSERVER_MODE=internal
+
+# Expose ports
+EXPOSE 8080 8443
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -fsk https://localhost:8443/health || curl -f http://localhost:8080/health || exit 1
+
+# Run as non-root user
+USER 1001
+
+# Working directory
+WORKDIR /data
+
+# Entrypoint
+ENTRYPOINT ["/opt/rpmserver/entrypoint.sh"]

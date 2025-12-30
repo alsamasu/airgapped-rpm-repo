@@ -1,0 +1,53 @@
+# airgap-ansible-control.service
+# Rootless Podman systemd user service for Ansible Control container
+#
+# Installation:
+#   mkdir -p ~/.config/systemd/user
+#   cp airgap-ansible-control.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now airgap-ansible-control
+#
+# Note: This service runs the container in sleep mode for on-demand
+# ansible-playbook execution via podman exec.
+
+[Unit]
+Description=Airgapped Ansible Control Environment
+Documentation=https://github.com/alsamasu/airgapped-rpm-repo
+After=network-online.target airgap-rpm-publisher.service
+Wants=network-online.target
+Requires=airgap-rpm-publisher.service
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+TimeoutStartSec=300
+TimeoutStopSec=30
+
+# Environment
+Environment=PODMAN_SYSTEMD_UNIT=%n
+Environment=ANSIBLE_DATA_DIR=/home/rpmops/ansible
+Environment=SSH_KEY_DIR=/home/rpmops/.ssh
+
+# Pull and run container
+ExecStartPre=-/usr/bin/podman pull localhost/airgap-ansible-control:latest
+ExecStartPre=-/usr/bin/podman rm -f airgap-ansible-control
+
+ExecStart=/usr/bin/podman run \
+    --name airgap-ansible-control \
+    --rm \
+    --replace \
+    --log-driver=journald \
+    --network=host \
+    --volume ${ANSIBLE_DATA_DIR}/inventory:/runner/inventory:Z \
+    --volume ${ANSIBLE_DATA_DIR}/artifacts:/runner/artifacts:Z \
+    --volume ${SSH_KEY_DIR}:/runner/.ssh:ro,Z \
+    --env ANSIBLE_HOST_KEY_CHECKING=False \
+    localhost/airgap-ansible-control:latest \
+    sleep infinity
+
+ExecStop=/usr/bin/podman stop -t 10 airgap-ansible-control
+ExecStopPost=-/usr/bin/podman rm -f airgap-ansible-control
+
+[Install]
+WantedBy=default.target

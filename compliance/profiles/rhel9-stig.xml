@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- RHEL 9 STIG Profile Reference -->
+<!-- This file documents the STIG profile used for OpenSCAP evaluation -->
+<Profile xmlns="http://checklists.nist.gov/xccdf/1.2" id="internal_rhel9_stig">
+  <title>Internal RHEL 9 STIG Profile</title>
+  <description>
+    Profile for evaluating RHEL 9 systems against DISA STIG requirements.
+    Based on SCAP Security Guide ssg-rhel9-ds.xml.
+  </description>
+
+  <metadata>
+    <dc:creator xmlns:dc="http://purl.org/dc/elements/1.1/">DevSecOps Team</dc:creator>
+    <dc:date xmlns:dc="http://purl.org/dc/elements/1.1/">2024-01-15</dc:date>
+  </metadata>
+
+  <reference href="https://public.cyber.mil/stigs/">DISA STIG</reference>
+  <reference href="https://www.open-scap.org/">OpenSCAP</reference>
+
+  <!-- Reference Profile -->
+  <base-profile>xccdf_org.ssgproject.content_profile_stig</base-profile>
+
+  <!-- Tailoring Notes -->
+  <!--
+    The following tailoring may be applied for the internal publisher:
+
+    1. Password Authentication (RHEL-09-255010)
+       - Modified: SSH password auth disabled, key-based auth required
+       - Justification: Keys managed through authorized_keys
+
+    2. Root Login (RHEL-09-255015)
+       - Modified: Root login allowed with key only (prohibit-password)
+       - Justification: Required for initial system administration
+
+    3. USB Storage (RHEL-09-291010)
+       - Enforced: USB storage disabled
+       - Justification: Airgapped environment uses controlled media
+
+    4. Audit Logging (RHEL-09-653xxx)
+       - Enforced: All audit rules active
+       - Additional: Repository change monitoring added
+  -->
+</Profile>
