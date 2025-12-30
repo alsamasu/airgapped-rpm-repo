@@ -182,12 +182,15 @@ e2e: validate-spec
 	@echo "  JSON:   $(ARTIFACTS_DIR)/e2e/report.json"
 
 guide-validate:
-	@echo "$(CYAN)Validating operator guide...$(NC)"
+	@echo "$(CYAN)Validating operator guides...$(NC)"
+	@mkdir -p $(ARTIFACTS_DIR)/guide-validate
 	@chmod +x $(SCRIPTS_DIR)/validate-operator-guide.sh
 	@$(SCRIPTS_DIR)/validate-operator-guide.sh \
-		--guide docs/operator_guide_automated.md \
-		--spec $(SPEC_FILE)
+		--guides docs/deployment_guide.md,docs/administration_guide.md \
+		--spec $(SPEC_FILE) \
+		--output-dir $(ARTIFACTS_DIR)/guide-validate
 	@echo "$(GREEN)Guide validation complete!$(NC)"
+	@echo "  Reports: $(ARTIFACTS_DIR)/guide-validate/"
 
 #------------------------------------------------------------------------------
 # OVA Building
