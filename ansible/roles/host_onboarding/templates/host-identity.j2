@@ -1,0 +1,27 @@
+# /etc/airgap/host-identity
+# Airgapped Infrastructure Host Identity
+# Managed by Ansible - do not edit manually
+#
+# Generated: {{ ansible_date_time.iso8601 }}
+# Playbook: host_onboarding
+
+# Unique host identifier for this system
+AIRGAP_HOST_ID="{{ effective_host_id }}"
+
+# Host information
+HOSTNAME="{{ ansible_hostname }}"
+FQDN="{{ ansible_fqdn }}"
+
+# OS information
+OS_ID="{{ ansible_distribution | lower }}"
+OS_VERSION="{{ ansible_distribution_version }}"
+OS_MAJOR="{{ ansible_distribution_major_version }}"
+
+# Onboarding metadata
+ONBOARDED_AT="{{ ansible_date_time.iso8601 }}"
+LIFECYCLE_ENV="{{ repo_lifecycle_env }}"
+REPO_PROFILE="{{ effective_repo_profile | default('rhel' + ansible_distribution_major_version) }}"
+
+# Infrastructure endpoints
+REPO_URL="{{ internal_repo_url }}"
+SYSLOG_TARGET="{{ syslog_tls_target_host }}:{{ syslog_tls_target_port }}"

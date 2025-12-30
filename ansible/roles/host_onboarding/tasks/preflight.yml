@@ -1,0 +1,119 @@
+---
+# ansible/roles/host_onboarding/tasks/preflight.yml
+# Pre-flight validation before host onboarding
+
+- name: Validate airgap_host_id is defined
+  ansible.builtin.assert:
+    that:
+      - airgap_host_id is defined
+      - airgap_host_id | length > 0
+    fail_msg: |
+      ERROR: airgap_host_id is required for host onboarding.
+      
+      Set it in your inventory:
+        hosts:
+          myhost:
+            airgap_host_id: myhost-01
+      
+      Or pass as extra var:
+        ansible-playbook ... -e airgap_host_id=myhost-01
+    success_msg: "Host ID validated: {{ airgap_host_id }}"
+
+- name: Set effective host identity
+  ansible.builtin.set_fact:
+    effective_host_id: "{{ airgap_host_id }}"
+
+- name: Validate host ID format
+  ansible.builtin.assert:
+    that:
+      - effective_host_id is regex('^[a-zA-Z0-9][a-zA-Z0-9._-]*$')
+    fail_msg: |
+      ERROR: Invalid host ID format: {{ effective_host_id }}
+      
+      Host ID must:
+      - Start with alphanumeric character
+      - Contain only: a-z, A-Z, 0-9, dots, underscores, hyphens
+    success_msg: "Host ID format valid"
+
+- name: Check OS compatibility
+  ansible.builtin.assert:
+    that:
+      - ansible_os_family == 'RedHat'
+      - ansible_distribution_major_version | int >= 8
+    fail_msg: |
+      ERROR: Unsupported operating system.
+      
+      Detected: {{ ansible_distribution }} {{ ansible_distribution_version }}
+      Required: RHEL/AlmaLinux/Rocky 8.x or 9.x
+    success_msg: "OS compatible: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+- name: Check DNS resolution for repository server
+  ansible.builtin.command: "getent hosts {{ internal_repo_host }}"
+  register: dns_repo_check
+  changed_when: false
+  failed_when: false
+  when: preflight_check_dns | bool
+
+- name: Warn if repository DNS fails
+  ansible.builtin.debug:
+    msg: |
+      WARNING: Cannot resolve {{ internal_repo_host }}
+      Ensure DNS is configured or add to /etc/hosts
+  when:
+    - preflight_check_dns | bool
+    - dns_repo_check.rc != 0
+
+- name: Check DNS resolution for syslog server
+  ansible.builtin.command: "getent hosts {{ syslog_tls_target_host }}"
+  register: dns_syslog_check
+  changed_when: false
+  failed_when: false
+  when:
+    - preflight_check_dns | bool
+    - onboard_configure_syslog | bool
+
+- name: Check available disk space
+  ansible.builtin.shell: |
+    df -m / | tail -1 | awk '{print $4}'
+  register: disk_space
+  changed_when: false
+  when: preflight_check_disk_space_mb > 0
+
+- name: Validate disk space
+  ansible.builtin.assert:
+    that:
+      - disk_space.stdout | int >= preflight_check_disk_space_mb
+    fail_msg: |
+      ERROR: Insufficient disk space.
+      
+      Available: {{ disk_space.stdout }}MB
+      Required: {{ preflight_check_disk_space_mb }}MB
+    success_msg: "Disk space OK: {{ disk_space.stdout }}MB available"
+  when: preflight_check_disk_space_mb > 0
+
+- name: Test network connectivity to repository
+  ansible.builtin.wait_for:
+    host: "{{ internal_repo_host }}"
+    port: "{{ internal_repo_https_port }}"
+    timeout: 10
+  register: repo_connectivity
+  failed_when: false
+  when: preflight_check_connectivity | bool
+
+- name: Warn if repository is unreachable
+  ansible.builtin.debug:
+    msg: |
+      WARNING: Cannot reach {{ internal_repo_host }}:{{ internal_repo_https_port }}
+      Repository configuration may fail. Ensure network connectivity.
+  when:
+    - preflight_check_connectivity | bool
+    - repo_connectivity.failed | default(false)
+
+- name: Pre-flight checks complete
+  ansible.builtin.debug:
+    msg: |
+      Pre-flight checks passed:
+      - Host ID: {{ effective_host_id }}
+      - OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+      - Kernel: {{ ansible_kernel }}
+      - Architecture: {{ ansible_architecture }}

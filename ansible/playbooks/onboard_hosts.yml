@@ -1,0 +1,133 @@
+---
+# ansible/playbooks/onboard_hosts.yml
+# Host Onboarding Playbook
+#
+# Onboards managed hosts to the airgapped RPM infrastructure:
+# - Validates pre-requisites
+# - Configures host identity
+# - Sets up internal repository access
+# - Configures syslog TLS forwarding
+# - Collects initial package manifest
+# - Verifies configuration
+#
+# REQUIREMENTS:
+#   - airgap_host_id must be defined for each host
+#   - SSH access to target hosts (key-based or password)
+#   - Network connectivity to internal repository
+#
+# Usage:
+#   # Onboard all managed hosts
+#   ansible-playbook playbooks/onboard_hosts.yml
+#
+#   # Onboard specific hosts
+#   ansible-playbook playbooks/onboard_hosts.yml --limit myhost
+#
+#   # Onboard with testing lifecycle
+#   ansible-playbook playbooks/onboard_hosts.yml -e repo_lifecycle_env=testing
+#
+#   # Skip syslog configuration
+#   ansible-playbook playbooks/onboard_hosts.yml -e onboard_configure_syslog=false
+#
+#   # Dry run (check mode)
+#   ansible-playbook playbooks/onboard_hosts.yml --check
+#
+# Tags:
+#   preflight  - Run pre-flight validation only
+#   identity   - Configure host identity only
+#   repository - Configure repository only
+#   syslog     - Configure syslog only
+#   manifest   - Collect manifest only
+#   verify     - Run verification only
+#   onboard    - Run full onboarding (default)
+
+- name: Host Onboarding - Airgapped RPM Infrastructure
+  hosts: managed_hosts
+  become: true
+  gather_facts: true
+  
+  vars:
+    # Ensure manifest directory exists
+    manifest_dir: "{{ playbook_dir }}/../artifacts/manifests"
+    
+  pre_tasks:
+    - name: Display onboarding banner
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          HOST ONBOARDING
+          ============================================================
+          Target Host:    {{ inventory_hostname }}
+          Host ID:        {{ airgap_host_id | default('NOT SET - WILL FAIL') }}
+          Lifecycle:      {{ repo_lifecycle_env }}
+          Repository:     {{ internal_repo_url }}
+          Syslog Target:  {{ syslog_tls_target_host }}:{{ syslog_tls_target_port }}
+          ============================================================
+      tags:
+        - always
+        
+    - name: Create local manifest directory
+      ansible.builtin.file:
+        path: "{{ manifest_dir }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      become: false
+      run_once: true
+      tags:
+        - manifest
+        - onboard
+
+  roles:
+    - role: host_onboarding
+      tags:
+        - onboard
+
+  post_tasks:
+    - name: Display next steps
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          ONBOARDING COMPLETE - NEXT STEPS
+          ============================================================
+          
+          1. Verify repository access:
+             ssh {{ inventory_hostname }} 'dnf repolist'
+          
+          2. Test package installation:
+             ssh {{ inventory_hostname }} 'dnf install -y tree'
+          
+          3. Check syslog forwarding:
+             ssh {{ inventory_hostname }} 'logger -t test "Onboarding test"'
+             # Check syslog sink for message
+          
+          4. View collected manifest:
+             cat {{ manifest_dir }}/{{ effective_host_id }}/onboarding.json
+          
+          5. To re-run onboarding:
+             ansible-playbook playbooks/onboard_hosts.yml --limit {{ inventory_hostname }}
+          
+          ============================================================
+      tags:
+        - always
+
+
+# Optional: Onboard new hosts with password authentication
+- name: Host Onboarding - New Hosts (Password Auth)
+  hosts: new_hosts
+  become: true
+  gather_facts: true
+  
+  vars:
+    manifest_dir: "{{ playbook_dir }}/../artifacts/manifests"
+    # For new hosts, we may need to be more lenient
+    preflight_check_connectivity: false
+    
+  roles:
+    - role: host_onboarding
+      tags:
+        - onboard
+        - new_hosts
+        
+  tags:
+    - new_hosts
+    - never

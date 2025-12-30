@@ -1,0 +1,40 @@
+# /etc/yum.repos.d/internal.repo
+# Internal airgapped RPM repository configuration
+# Managed by Ansible - do not edit manually
+#
+# Generated: {{ ansible_date_time.iso8601 }}
+# Host: {{ effective_host_id }}
+# Profile: {{ effective_repo_profile }}
+# Lifecycle: {{ repo_lifecycle_env }}
+
+[internal-{{ repo_lifecycle_env }}-baseos]
+name=Internal {{ repo_lifecycle_env | title }} - BaseOS
+baseurl={{ repo_base_url }}/{{ effective_repo_profile }}/$basearch/baseos
+enabled=1
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-internal
+sslverify=0
+metadata_expire=86400
+skip_if_unavailable=1
+
+[internal-{{ repo_lifecycle_env }}-appstream]
+name=Internal {{ repo_lifecycle_env | title }} - AppStream
+baseurl={{ repo_base_url }}/{{ effective_repo_profile }}/$basearch/appstream
+enabled=1
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-internal
+sslverify=0
+metadata_expire=86400
+skip_if_unavailable=1
+
+{% if ansible_distribution_major_version | int >= 9 %}
+[internal-{{ repo_lifecycle_env }}-crb]
+name=Internal {{ repo_lifecycle_env | title }} - CRB
+baseurl={{ repo_base_url }}/{{ effective_repo_profile }}/$basearch/crb
+enabled=0
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-internal
+sslverify=0
+metadata_expire=86400
+skip_if_unavailable=1
+{% endif %}

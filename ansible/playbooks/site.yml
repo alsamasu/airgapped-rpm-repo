@@ -20,6 +20,7 @@
           =========================================
           Available tags:
           - bootstrap: SSH key deployment
+          - onboard: Host onboarding (identity, repo, syslog)
           - configure: Repository client configuration
           - manifests: Package manifest collection
           - patch: Monthly security patching
@@ -32,6 +33,12 @@
   tags:
     - bootstrap
     - never
+
+# Onboard new hosts to infrastructure
+- name: Onboard hosts
+  ansible.builtin.import_playbook: onboard_hosts.yml
+  tags:
+    - onboard
 
 # Configure repository clients
 - name: Configure internal repository

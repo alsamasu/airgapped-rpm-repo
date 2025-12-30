@@ -1,0 +1,36 @@
+---
+# ansible/roles/host_onboarding/tasks/identity.yml
+# Configure host identity for airgapped infrastructure
+
+- name: Create airgap configuration directory
+  ansible.builtin.file:
+    path: "{{ host_identity_file | dirname }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Write host identity file
+  ansible.builtin.template:
+    src: host-identity.j2
+    dest: "{{ host_identity_file }}"
+    mode: '0644'
+    owner: root
+    group: root
+    backup: true
+  register: identity_written
+
+- name: Create host identity symlink for compatibility
+  ansible.builtin.file:
+    src: "{{ host_identity_file }}"
+    dest: /etc/airgap-host-id
+    state: link
+    force: true
+
+- name: Display host identity configuration
+  ansible.builtin.debug:
+    msg: |
+      Host identity configured:
+      - Host ID: {{ effective_host_id }}
+      - Identity file: {{ host_identity_file }}
+      - Created: {{ identity_written.changed }}
