@@ -1,0 +1,25 @@
+{
+  "simulation_version": 2,
+  "timestamp": "2025-12-30T17:20:00Z",
+  "guide_version": "post-fix (Windows PowerShell support)",
+  "deployment_method": "kickstart_iso",
+  "operator_platform": "Windows 11",
+  "inputs": {
+    "rhel_iso_path": "[esx (1)] isos/rhel-9.6-x86_64-dvd.iso",
+    "iso_datastore_folder": "isos",
+    "vcenter_server": "192.168.1.99",
+    "network_portgroup": "LAN",
+    "vm_names": {
+      "rpm_external": "rpm-external",
+      "rpm_internal": "rpm-internal"
+    },
+    "vm_sizing": "defaults",
+    "credentials": {
+      "initial_root_password": "[REDACTED]",
+      "initial_admin_user": "admin",
+      "initial_admin_password": "[REDACTED]"
+    },
+    "enable_fips": true,
+    "managed_hosts": "none_available"
+  }
+}
