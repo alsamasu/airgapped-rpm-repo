@@ -69,16 +69,42 @@
     verify_results: "{{ verify_results + [{'check': 'Syslog TLS Config', 'status': syslog_config_check.stat.exists | ternary('PASS', 'FAIL')}] }}"
   when: onboard_configure_syslog | bool
 
-- name: Verify rsyslog is running
+- name: Check if systemd is available
+  ansible.builtin.stat:
+    path: /run/systemd/system
+  register: systemd_available
+
+- name: Verify rsyslog is running (systemd)
   ansible.builtin.systemd:
     name: rsyslog
-  register: rsyslog_status
-  when: onboard_configure_syslog | bool
+  register: rsyslog_status_systemd
+  when:
+    - onboard_configure_syslog | bool
+    - systemd_available.stat.exists | default(false)
+  failed_when: false
 
-- name: Record rsyslog status verification
+- name: Verify rsyslog is running (pgrep)
+  ansible.builtin.shell: pgrep rsyslogd
+  register: rsyslog_status_pgrep
+  changed_when: false
+  failed_when: false
+  when:
+    - onboard_configure_syslog | bool
+    - not (systemd_available.stat.exists | default(false))
+
+- name: Record rsyslog status verification (systemd)
   ansible.builtin.set_fact:
-    verify_results: "{{ verify_results + [{'check': 'Rsyslog Running', 'status': (rsyslog_status.status.ActiveState == 'active') | ternary('PASS', 'FAIL')}] }}"
-  when: onboard_configure_syslog | bool
+    verify_results: "{{ verify_results + [{'check': 'Rsyslog Running', 'status': (rsyslog_status_systemd.status.ActiveState | default('') == 'active') | ternary('PASS', 'FAIL')}] }}"
+  when:
+    - onboard_configure_syslog | bool
+    - systemd_available.stat.exists | default(false)
+
+- name: Record rsyslog status verification (pgrep)
+  ansible.builtin.set_fact:
+    verify_results: "{{ verify_results + [{'check': 'Rsyslog Running', 'status': (rsyslog_status_pgrep.rc | default(1) == 0) | ternary('PASS', 'FAIL')}] }}"
+  when:
+    - onboard_configure_syslog | bool
+    - not (systemd_available.stat.exists | default(false))
 
 - name: Test package search (verification)
   ansible.builtin.command: dnf search bash

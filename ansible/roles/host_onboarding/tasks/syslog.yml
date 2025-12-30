@@ -48,11 +48,24 @@
     group: root
   notify: Restart rsyslog
 
-- name: Ensure rsyslog is enabled and running
+- name: Check if systemd is available
+  ansible.builtin.stat:
+    path: /run/systemd/system
+  register: systemd_check
+
+- name: Ensure rsyslog is enabled and running (systemd)
   ansible.builtin.systemd:
     name: rsyslog
     enabled: true
     state: started
+  when: systemd_check.stat.exists | default(false)
+
+- name: Start rsyslog directly (container/non-systemd)
+  ansible.builtin.shell: |
+    pkill rsyslogd 2>/dev/null || true
+    rsyslogd
+  changed_when: false
+  when: not (systemd_check.stat.exists | default(false))
 
 - name: Flush handlers to apply rsyslog config
   ansible.builtin.meta: flush_handlers
