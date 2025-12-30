@@ -30,40 +30,43 @@ The primary configuration file controls all deployment parameters:
 
 ```yaml
 vcenter:
-  server: vcenter.example.com
-  username: administrator@vsphere.local
-  password: "vCenterPassword"
-  datacenter: Datacenter
-  cluster: Cluster
-  datastore: datastore1
-  network: "VM Network"
-  folder: "/Datacenter/vm/RPM-Infrastructure"
+  server: "vcenter.example.local"
+  datacenter: "Datacenter"
+  cluster: "Cluster01"
+  datastore: "datastore1"
+  folder: ""  # Optional: VM folder path
+  resource_pool: ""  # Optional
+  # Credentials via environment: VMWARE_USER, VMWARE_PASSWORD
 
-vms:
+network:
+  portgroup_name: "LAN"
+  dhcp: true  # Required; static IP not supported in automated install
+
+isos:
+  rhel96_iso_path: "/isos/rhel-9.6-x86_64-dvd.iso"
+  iso_datastore_folder: "isos"
+
+vm_names:
+  rpm_external: "rpm-external"
+  rpm_internal: "rpm-internal"
+
+vm_sizing:
   external:
-    name: rpm-external
-    hostname: rpm-external.example.com
-    ip: ""
-    cpu: 4
+    cpu: 2
     memory_gb: 8
     disk_gb: 200
   internal:
-    name: rpm-internal
-    hostname: rpm-internal.example.com
-    ip: ""
-    cpu: 4
-    memory_gb: 16
-    disk_gb: 500
+    cpu: 2
+    memory_gb: 8
+    disk_gb: 200
 
 credentials:
-  root_password: "SecureRootPassword"
-  rpmops_password: "SecureOpsPassword"
+  initial_root_password: "ChangeMe123!"
+  initial_admin_user: "admin"
+  initial_admin_password: "ChangeMe123!"
 
-options:
-  fips_mode: false
-  timezone: America/New_York
-
-iso_path: /path/to/rhel-9.6-x86_64-dvd.iso
+compliance:
+  enable_fips: true
 ```
 
 ### Generating Initial Configuration
@@ -91,8 +94,8 @@ iso_path: /path/to/rhel-9.6-x86_64-dvd.iso
 
 2. Review the generated discovery output:
    ```bash
-   cat output/vsphere-defaults.json
-   cat output/spec.detected.yaml
+   cat automation/artifacts/vsphere-defaults.json
+   cat automation/artifacts/spec.detected.yaml
    ```
 
 ---
@@ -114,7 +117,12 @@ iso_path: /path/to/rhel-9.6-x86_64-dvd.iso
 ### Step 1: Generate Kickstart ISOs
 
 ```bash
-pwsh automation/powercli/generate-ks-iso.ps1 -SpecFile config/spec.yaml
+make generate-ks-iso
+```
+
+Alternatively, run the PowerCLI script directly:
+```bash
+pwsh automation/powercli/generate-ks-iso.ps1 -SpecPath config/spec.yaml
 ```
 
 ### Step 2: Deploy VMs
@@ -123,8 +131,17 @@ pwsh automation/powercli/generate-ks-iso.ps1 -SpecFile config/spec.yaml
 make servers-deploy
 ```
 
-### Step 3: Validate Installation
+### Step 3: Wait for Installation and Discover IPs
 
+Wait for VMs to complete installation and obtain DHCP-assigned IPs:
+```bash
+make servers-wait
+make servers-report
+```
+
+### Step 4: Validate Installation
+
+Using the IPs from `servers-report`:
 ```bash
 ssh admin@<internal-ip> "systemctl --user -M rpmops@ status airgap-rpm-publisher.service"
 curl -k https://<internal-ip>/repo/stable/
@@ -148,9 +165,12 @@ Deploy through vSphere Client or PowerCLI with OVF properties for hostname and n
 
 ## Post-Install Validation
 
+Run the E2E test suite:
 ```bash
-make e2e INVENTORY=inventories/lab.yml
+make e2e
 ```
+
+Reports are generated in `automation/artifacts/e2e/`.
 
 ---
 
