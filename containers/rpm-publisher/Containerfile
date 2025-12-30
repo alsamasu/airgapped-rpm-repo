@@ -7,13 +7,15 @@
 # - Lifecycle environments (testing/stable)
 # - Bundle import, validation, and publishing
 
-FROM registry.access.redhat.com/ubi9/ubi:latest
+FROM almalinux:9
 
 LABEL maintainer="RPM Repository Team"
 LABEL description="Airgapped RPM Repository Publisher with HTTPS"
 
-# Install required packages
-RUN dnf install -y \
+# Enable CRB repo for createrepo_c and install dependencies
+RUN dnf install -y --setopt=tsflags=nodocs dnf-plugins-core \
+    && dnf config-manager --set-enabled crb \
+    && dnf install -y --setopt=tsflags=nodocs \
     httpd \
     mod_ssl \
     createrepo_c \

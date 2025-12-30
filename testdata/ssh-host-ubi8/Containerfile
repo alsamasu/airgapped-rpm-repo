@@ -1,5 +1,5 @@
 # testdata/ssh-host-ubi8/Containerfile
-# SSH-enabled UBI8 test container
+# SSH-enabled AlmaLinux 8 test container
 #
 # Simulates a managed RHEL 8 host for E2E testing of:
 # - SSH key deployment
@@ -7,13 +7,14 @@
 # - Package manifest collection
 # - Patching operations
 
-FROM registry.access.redhat.com/ubi8/ubi:latest
+FROM almalinux:8
 
 LABEL maintainer="RPM Repository Team"
-LABEL description="SSH-enabled UBI8 test host"
+LABEL description="SSH-enabled AlmaLinux 8 test host"
 
 # Install SSH server and utilities
-RUN dnf install -y \
+# Use --allowerasing to handle any package conflicts
+RUN dnf install -y --setopt=tsflags=nodocs --allowerasing \
     openssh-server \
     openssh-clients \
     sudo \
@@ -22,6 +23,8 @@ RUN dnf install -y \
     rsyslog-gnutls \
     procps-ng \
     iproute \
+    curl \
+    nmap-ncat \
     && dnf clean all \
     && rm -rf /var/cache/dnf
 

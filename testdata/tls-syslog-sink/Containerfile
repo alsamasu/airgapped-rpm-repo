@@ -4,16 +4,17 @@
 # Receives syslog messages over TLS (server-auth only, no mTLS)
 # Used for testing rsyslog TLS forwarding from managed hosts.
 
-FROM registry.access.redhat.com/ubi9/ubi:latest
+FROM almalinux:9
 
 LABEL maintainer="RPM Repository Team"
 LABEL description="TLS Syslog Sink for testing"
 
 # Install rsyslog with TLS support
-RUN dnf install -y \
+RUN dnf install -y --setopt=tsflags=nodocs \
     rsyslog \
     rsyslog-gnutls \
     openssl \
+    procps-ng \
     && dnf clean all \
     && rm -rf /var/cache/dnf
 
