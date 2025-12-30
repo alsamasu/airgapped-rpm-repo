@@ -1,0 +1,38 @@
+---
+# ansible/playbooks/configure_internal_repo.yml
+# Configure managed hosts to use internal RPM repository
+#
+# Sets up yum/dnf repository configuration pointing to the
+# internal HTTPS repository with GPG key verification.
+#
+# Usage:
+#   ansible-playbook playbooks/configure_internal_repo.yml
+
+- name: Configure internal RPM repository on managed hosts
+  hosts: managed_hosts
+  gather_facts: true
+  
+  vars:
+    # Repository URLs
+    repo_base_url: "{{ internal_repo_url }}/lifecycle/{{ repo_lifecycle_env }}"
+    gpg_key_url: "{{ internal_repo_url }}/keys/RPM-GPG-KEY-internal"
+    
+    # CA certificate for HTTPS verification
+    ca_cert_source: /etc/pki/tls/certs/internal-ca.crt
+    ca_cert_dest: /etc/pki/tls/certs/internal-ca.crt
+    
+    # Disable external repos
+    disable_external_repos: true
+    
+  roles:
+    - role: repo_client
+      
+  tasks:
+    - name: Display repository configuration summary
+      ansible.builtin.debug:
+        msg: |
+          Repository configuration complete:
+          - Base URL: {{ repo_base_url }}
+          - Profile: {{ repo_profile | default('auto') }}
+          - Lifecycle: {{ repo_lifecycle_env }}
+          - GPG Check: enabled

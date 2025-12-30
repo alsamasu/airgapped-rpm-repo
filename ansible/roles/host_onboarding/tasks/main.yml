@@ -1,0 +1,81 @@
+---
+# ansible/roles/host_onboarding/tasks/main.yml
+# Host onboarding orchestration
+#
+# Onboards a managed host to the airgapped RPM infrastructure:
+# 1. Pre-flight validation
+# 2. Host identity configuration
+# 3. Repository client setup
+# 4. Syslog TLS forwarding
+# 5. Initial manifest collection
+# 6. Connectivity verification
+#
+# Variables:
+#   airgap_host_id: Unique host identifier (REQUIRED)
+#   internal_repo_url: Internal repository URL
+#   syslog_tls_target_host: Syslog server hostname
+
+- name: Include pre-flight checks
+  ansible.builtin.include_tasks: preflight.yml
+  tags:
+    - preflight
+    - onboard
+
+- name: Include host identity configuration
+  ansible.builtin.include_tasks: identity.yml
+  tags:
+    - identity
+    - onboard
+
+- name: Include repository configuration
+  ansible.builtin.include_tasks: repository.yml
+  when: onboard_configure_repo | bool
+  tags:
+    - repository
+    - onboard
+
+- name: Include syslog TLS configuration
+  ansible.builtin.include_tasks: syslog.yml
+  when: onboard_configure_syslog | bool
+  tags:
+    - syslog
+    - onboard
+
+- name: Include manifest collection
+  ansible.builtin.include_tasks: manifest.yml
+  when: onboard_collect_manifest | bool
+  tags:
+    - manifest
+    - onboard
+
+- name: Include connectivity verification
+  ansible.builtin.include_tasks: verify.yml
+  when: onboard_verify_connectivity | bool
+  tags:
+    - verify
+    - onboard
+
+- name: Display onboarding summary
+  ansible.builtin.debug:
+    msg: |
+      ============================================================
+      HOST ONBOARDING COMPLETE
+      ============================================================
+      Host ID:          {{ effective_host_id }}
+      Hostname:         {{ ansible_hostname }}
+      FQDN:             {{ ansible_fqdn }}
+      OS:               {{ ansible_distribution }} {{ ansible_distribution_version }}
+      
+      Configuration:
+      - Repository:     {{ 'Configured' if onboard_configure_repo else 'Skipped' }}
+      - Lifecycle:      {{ repo_lifecycle_env }}
+      - Syslog TLS:     {{ 'Configured' if onboard_configure_syslog else 'Skipped' }}
+      - Manifest:       {{ 'Collected' if onboard_collect_manifest else 'Skipped' }}
+      
+      Next Steps:
+      1. Verify host appears in manifest collection
+      2. Test package installation: dnf install <package>
+      3. Check syslog forwarding: logger -t test "Hello from {{ ansible_hostname }}"
+      ============================================================
+  tags:
+    - always

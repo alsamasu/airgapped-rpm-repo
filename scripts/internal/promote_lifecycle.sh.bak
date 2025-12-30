@@ -1,0 +1,289 @@
+#!/bin/bash
+# promote_lifecycle.sh - Promote repositories between lifecycle channels
+#
+# This script promotes repositories from one lifecycle channel to another
+# (typically dev -> prod).
+#
+# Usage:
+#   ./promote_lifecycle.sh <from_channel> <to_channel>
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source common functions
+# shellcheck source=../common/logging.sh
+source "${SCRIPT_DIR}/../common/logging.sh"
+
+# Configuration
+DATA_DIR="${RPMSERVER_DATA_DIR:-/data}"
+LIFECYCLE_DIR="${DATA_DIR}/lifecycle"
+
+FROM_CHANNEL=""
+TO_CHANNEL=""
+FORCE=false
+
+usage() {
+    cat << 'EOF'
+Promote Repositories Between Lifecycle Channels
+
+Promotes repositories from one lifecycle channel to another.
+Typically used to promote from dev to prod after testing.
+
+Usage:
+  ./promote_lifecycle.sh <from> <to> [options]
+
+Arguments:
+  from               Source channel (e.g., dev)
+  to                 Destination channel (e.g., prod)
+
+Options:
+  --force            Force promotion even if target has newer content
+  -h, --help         Show this help message
+
+Examples:
+  # Promote from dev to prod
+  ./promote_lifecycle.sh dev prod
+
+  # Force promotion
+  ./promote_lifecycle.sh dev prod --force
+
+Rollback:
+  To rollback, use the archived bundles in the target channel:
+  ls /data/lifecycle/prod/.archive/
+
+EOF
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --force)
+                FORCE=true
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            -*)
+                log_error "Unknown option: $1"
+                usage
+                exit 1
+                ;;
+            *)
+                if [[ -z "${FROM_CHANNEL}" ]]; then
+                    FROM_CHANNEL="$1"
+                elif [[ -z "${TO_CHANNEL}" ]]; then
+                    TO_CHANNEL="$1"
+                else
+                    log_error "Unexpected argument: $1"
+                    usage
+                    exit 1
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "${FROM_CHANNEL}" || -z "${TO_CHANNEL}" ]]; then
+        log_error "Both source and destination channels required"
+        usage
+        exit 1
+    fi
+
+    if [[ "${FROM_CHANNEL}" == "${TO_CHANNEL}" ]]; then
+        log_error "Source and destination channels must be different"
+        exit 1
+    fi
+}
+
+validate_channels() {
+    local from_dir="${LIFECYCLE_DIR}/${FROM_CHANNEL}"
+    local to_dir="${LIFECYCLE_DIR}/${TO_CHANNEL}"
+
+    # Validate source exists
+    if [[ ! -d "${from_dir}" ]]; then
+        log_error "Source channel not found: ${FROM_CHANNEL}"
+        exit 1
+    fi
+
+    if [[ ! -d "${from_dir}/repos" ]]; then
+        log_error "Source channel has no repositories"
+        exit 1
+    fi
+
+    # Create destination if needed
+    mkdir -p "${to_dir}"
+
+    log_info "Source: ${FROM_CHANNEL}"
+    log_info "Destination: ${TO_CHANNEL}"
+}
+
+get_channel_bundle() {
+    local channel="$1"
+    local metadata_file="${LIFECYCLE_DIR}/${channel}/metadata.json"
+
+    if [[ -f "${metadata_file}" ]]; then
+        jq -r '.current_bundle // empty' "${metadata_file}"
+    else
+        echo ""
+    fi
+}
+
+check_promotion_safety() {
+    local from_bundle
+    local to_bundle
+
+    from_bundle=$(get_channel_bundle "${FROM_CHANNEL}")
+    to_bundle=$(get_channel_bundle "${TO_CHANNEL}")
+
+    log_info "Source bundle: ${from_bundle:-none}"
+    log_info "Destination bundle: ${to_bundle:-none}"
+
+    if [[ -z "${from_bundle}" ]]; then
+        log_error "Source channel has no bundle"
+        exit 1
+    fi
+
+    if [[ "${from_bundle}" == "${to_bundle}" ]]; then
+        log_info "Bundles are already the same"
+        exit 0
+    fi
+
+    # Check if destination is newer (based on version string)
+    if [[ -n "${to_bundle}" && "${FORCE}" != "true" ]]; then
+        # Simple string comparison - later dates/versions are "greater"
+        if [[ "${to_bundle}" > "${from_bundle}" ]]; then
+            log_warn "Destination has newer bundle: ${to_bundle}"
+            log_warn "Use --force to override"
+            exit 1
+        fi
+    fi
+}
+
+backup_destination() {
+    local to_dir="${LIFECYCLE_DIR}/${TO_CHANNEL}"
+    local to_bundle
+    to_bundle=$(get_channel_bundle "${TO_CHANNEL}")
+
+    if [[ -n "${to_bundle}" && -d "${to_dir}/repos" ]]; then
+        local archive_dir="${to_dir}/.archive"
+        mkdir -p "${archive_dir}"
+
+        local archive_name="${to_bundle}-$(date +%Y%m%d%H%M%S)"
+        log_info "Archiving current ${TO_CHANNEL} content..."
+        mv "${to_dir}/repos" "${archive_dir}/${archive_name}"
+        log_success "Archived as: ${archive_name}"
+    fi
+}
+
+promote() {
+    local from_dir="${LIFECYCLE_DIR}/${FROM_CHANNEL}"
+    local to_dir="${LIFECYCLE_DIR}/${TO_CHANNEL}"
+
+    log_info "Promoting content..."
+
+    # Copy repositories
+    mkdir -p "${to_dir}/repos"
+    rsync -av --delete "${from_dir}/repos/" "${to_dir}/repos/"
+
+    # Copy keys
+    if [[ -d "${from_dir}/keys" ]]; then
+        mkdir -p "${to_dir}/keys"
+        rsync -av "${from_dir}/keys/" "${to_dir}/keys/"
+    fi
+
+    # Copy updates
+    if [[ -d "${from_dir}/updates" ]]; then
+        mkdir -p "${to_dir}/updates"
+        rsync -av "${from_dir}/updates/" "${to_dir}/updates/"
+    fi
+
+    log_success "Content promoted"
+}
+
+update_metadata() {
+    local from_bundle
+    from_bundle=$(get_channel_bundle "${FROM_CHANNEL}")
+
+    local to_dir="${LIFECYCLE_DIR}/${TO_CHANNEL}"
+    local metadata_file="${to_dir}/metadata.json"
+
+    local now
+    now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+    if [[ -f "${metadata_file}" ]]; then
+        local current
+        current=$(cat "${metadata_file}")
+
+        local history_entry
+        history_entry="{\"bundle\":\"${from_bundle}\",\"promoted_from\":\"${FROM_CHANNEL}\",\"promoted_at\":\"${now}\"}"
+
+        echo "${current}" | jq \
+            --arg bundle "${from_bundle}" \
+            --arg now "${now}" \
+            --argjson entry "${history_entry}" \
+            '.current_bundle = $bundle | .last_updated = $now | .history = [$entry] + .history[:9]' \
+            > "${metadata_file}"
+    else
+        cat > "${metadata_file}" << METADATA
+{
+    "channel": "${TO_CHANNEL}",
+    "created": "${now}",
+    "current_bundle": "${from_bundle}",
+    "last_updated": "${now}",
+    "history": [
+        {
+            "bundle": "${from_bundle}",
+            "promoted_from": "${FROM_CHANNEL}",
+            "promoted_at": "${now}"
+        }
+    ]
+}
+METADATA
+    fi
+
+    log_info "Metadata updated"
+}
+
+show_status() {
+    echo ""
+    echo "Lifecycle Status:"
+    echo "=========================================="
+
+    for channel in dev prod; do
+        local channel_dir="${LIFECYCLE_DIR}/${channel}"
+        local metadata_file="${channel_dir}/metadata.json"
+
+        if [[ -f "${metadata_file}" ]]; then
+            local bundle
+            bundle=$(jq -r '.current_bundle // "none"' "${metadata_file}")
+            echo "  ${channel}: ${bundle}"
+        else
+            echo "  ${channel}: not configured"
+        fi
+    done
+
+    echo ""
+}
+
+main() {
+    parse_args "$@"
+
+    log_section "Promote: ${FROM_CHANNEL} -> ${TO_CHANNEL}"
+
+    validate_channels
+    check_promotion_safety
+    backup_destination
+    promote
+    update_metadata
+
+    show_status
+
+    log_audit "LIFECYCLE_PROMOTE" "Promoted from ${FROM_CHANNEL} to ${TO_CHANNEL}"
+
+    log_success "Promotion complete"
+}
+
+main "$@"

@@ -1,0 +1,184 @@
+---
+# ansible/playbooks/replace_repo_tls_cert.yml
+# Replace TLS Certificate on Internal RPM Server
+#
+# Replaces the self-signed bootstrap certificate with a CA-signed certificate.
+# The new certificate is deployed and the rpm-publisher service is restarted.
+#
+# Requirements:
+#   - CA-signed certificate file (PEM format)
+#   - Private key file (PEM format)
+#   - Optional: CA chain file (PEM format)
+#
+# Usage:
+#   ansible-playbook playbooks/replace_repo_tls_cert.yml \
+#     -e cert_path=/path/to/cert.crt \
+#     -e key_path=/path/to/key.pem
+#
+#   With CA chain:
+#   ansible-playbook playbooks/replace_repo_tls_cert.yml \
+#     -e cert_path=/path/to/cert.crt \
+#     -e key_path=/path/to/key.pem \
+#     -e ca_chain_path=/path/to/ca-chain.crt
+
+- name: Replace TLS Certificate on Internal RPM Server
+  hosts: internal_servers
+  become: true
+  gather_facts: true
+  
+  vars:
+    # These must be provided via -e on command line
+    # cert_path: /path/to/certificate.crt
+    # key_path: /path/to/private.key
+    # ca_chain_path: /path/to/ca-chain.crt  # optional
+    
+    # Destination paths on target
+    certs_dir: "{{ internal_services_certs_dir | default('/srv/airgap/certs') }}"
+    service_user: "{{ internal_services_service_user | default('rpmops') }}"
+    
+  pre_tasks:
+    - name: Validate required variables
+      ansible.builtin.assert:
+        that:
+          - cert_path is defined
+          - key_path is defined
+        fail_msg: "Required: -e cert_path=/path/to/cert.crt -e key_path=/path/to/key.pem"
+        
+    - name: Check certificate file exists locally
+      ansible.builtin.stat:
+        path: "{{ cert_path }}"
+      delegate_to: localhost
+      become: false
+      register: cert_stat
+      
+    - name: Check key file exists locally
+      ansible.builtin.stat:
+        path: "{{ key_path }}"
+      delegate_to: localhost
+      become: false
+      register: key_stat
+      
+    - name: Fail if files don't exist
+      ansible.builtin.fail:
+        msg: "Certificate or key file not found"
+      when: not cert_stat.stat.exists or not key_stat.stat.exists
+      
+    - name: Display certificate info
+      ansible.builtin.debug:
+        msg: |
+          Replacing TLS certificate on {{ inventory_hostname }}
+          
+          Certificate: {{ cert_path }}
+          Private Key: {{ key_path }}
+          CA Chain:    {{ ca_chain_path | default('Not provided') }}
+          
+          Destination: {{ certs_dir }}/
+  
+  tasks:
+    - name: Backup existing certificate
+      ansible.builtin.copy:
+        src: "{{ certs_dir }}/server.crt"
+        dest: "{{ certs_dir }}/server.crt.backup.{{ ansible_date_time.epoch }}"
+        remote_src: true
+        mode: '0644'
+      ignore_errors: true
+      
+    - name: Backup existing private key
+      ansible.builtin.copy:
+        src: "{{ certs_dir }}/server.key"
+        dest: "{{ certs_dir }}/server.key.backup.{{ ansible_date_time.epoch }}"
+        remote_src: true
+        mode: '0600'
+      ignore_errors: true
+      
+    - name: Deploy new certificate
+      ansible.builtin.copy:
+        src: "{{ cert_path }}"
+        dest: "{{ certs_dir }}/server.crt"
+        owner: "{{ service_user }}"
+        group: "{{ service_user }}"
+        mode: '0644'
+      notify: Restart rpm-publisher
+      
+    - name: Deploy new private key
+      ansible.builtin.copy:
+        src: "{{ key_path }}"
+        dest: "{{ certs_dir }}/server.key"
+        owner: "{{ service_user }}"
+        group: "{{ service_user }}"
+        mode: '0600'
+      notify: Restart rpm-publisher
+      
+    - name: Deploy CA chain (if provided)
+      ansible.builtin.copy:
+        src: "{{ ca_chain_path }}"
+        dest: "{{ certs_dir }}/ca-chain.crt"
+        owner: "{{ service_user }}"
+        group: "{{ service_user }}"
+        mode: '0644'
+      when: ca_chain_path is defined
+      notify: Restart rpm-publisher
+      
+    - name: Verify certificate validity
+      ansible.builtin.shell: |
+        openssl x509 -in {{ certs_dir }}/server.crt -noout -text | head -20
+      register: cert_info
+      changed_when: false
+      
+    - name: Display certificate details
+      ansible.builtin.debug:
+        msg: |
+          Certificate deployed successfully:
+          {{ cert_info.stdout }}
+          
+    - name: Verify certificate matches private key
+      ansible.builtin.shell: |
+        CERT_MOD=$(openssl x509 -noout -modulus -in {{ certs_dir }}/server.crt | openssl md5)
+        KEY_MOD=$(openssl rsa -noout -modulus -in {{ certs_dir }}/server.key | openssl md5)
+        if [ "$CERT_MOD" = "$KEY_MOD" ]; then
+          echo "MATCH"
+        else
+          echo "MISMATCH"
+          exit 1
+        fi
+      register: key_match
+      changed_when: false
+      failed_when: key_match.stdout != "MATCH"
+      
+  handlers:
+    - name: Restart rpm-publisher
+      ansible.builtin.shell: |
+        # Restart as service user
+        sudo -u {{ service_user }} XDG_RUNTIME_DIR=/run/user/$(id -u {{ service_user }}) \
+          systemctl --user restart rpm-publisher
+      
+  post_tasks:
+    - name: Wait for service to be ready
+      ansible.builtin.wait_for:
+        port: "{{ internal_repo_https_port | default(8443) }}"
+        delay: 5
+        timeout: 60
+        
+    - name: Verify HTTPS is working
+      ansible.builtin.uri:
+        url: "https://localhost:{{ internal_repo_https_port | default(8443) }}/"
+        validate_certs: false
+        status_code: [200, 301, 302, 403]
+      register: https_check
+      
+    - name: Display completion message
+      ansible.builtin.debug:
+        msg: |
+          ============================================================
+          TLS CERTIFICATE REPLACED SUCCESSFULLY
+          ============================================================
+          
+          Server: {{ inventory_hostname }}
+          Certificate: {{ certs_dir }}/server.crt
+          
+          The new certificate is now active.
+          
+          To distribute the CA certificate to managed hosts, run:
+            ansible-playbook playbooks/onboard_hosts.yml --tags repository
+          
+          ============================================================

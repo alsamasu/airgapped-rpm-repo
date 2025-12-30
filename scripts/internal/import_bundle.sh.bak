@@ -1,0 +1,304 @@
+#!/bin/bash
+# import_bundle.sh - Import bundle from hand-carry media
+#
+# This script imports a bundle from hand-carry media, extracts it,
+# and prepares it for verification and publishing.
+#
+# Usage:
+#   ./import_bundle.sh /path/to/bundle.tar.gz
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source common functions
+# shellcheck source=../common/logging.sh
+source "${SCRIPT_DIR}/../common/logging.sh"
+# shellcheck source=../common/validation.sh
+source "${SCRIPT_DIR}/../common/validation.sh"
+
+# Configuration
+DATA_DIR="${RPMSERVER_DATA_DIR:-/data}"
+BUNDLES_DIR="${DATA_DIR}/bundles"
+INCOMING_DIR="${BUNDLES_DIR}/incoming"
+VERIFIED_DIR="${BUNDLES_DIR}/verified"
+ARCHIVE_DIR="${BUNDLES_DIR}/archive"
+
+BUNDLE_PATH=""
+SKIP_CHECKSUM=false
+
+usage() {
+    cat << 'EOF'
+Import Bundle from Hand-Carry Media
+
+Imports a repository bundle, extracts it, and prepares it for
+verification and publishing.
+
+Usage:
+  ./import_bundle.sh /path/to/bundle.tar.gz [options]
+
+Options:
+  --skip-checksum     Skip SHA256 checksum verification
+  -h, --help          Show this help message
+
+Examples:
+  # Import bundle from USB drive
+  ./import_bundle.sh /media/usb/bundle-2024-01-15-001.tar.gz
+
+  # Import from local path
+  ./import_bundle.sh /tmp/bundles/security-update-2024-01-15-001.tar.gz
+
+EOF
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --skip-checksum)
+                SKIP_CHECKSUM=true
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            -*)
+                log_error "Unknown option: $1"
+                usage
+                exit 1
+                ;;
+            *)
+                if [[ -z "${BUNDLE_PATH}" ]]; then
+                    BUNDLE_PATH="$1"
+                else
+                    log_error "Unexpected argument: $1"
+                    usage
+                    exit 1
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "${BUNDLE_PATH}" ]]; then
+        log_error "Bundle path required"
+        usage
+        exit 1
+    fi
+}
+
+ensure_directories() {
+    mkdir -p "${INCOMING_DIR}"
+    mkdir -p "${VERIFIED_DIR}"
+    mkdir -p "${ARCHIVE_DIR}"
+}
+
+verify_bundle_checksum() {
+    local bundle_path="$1"
+    local checksum_file="${bundle_path}.sha256"
+
+    if [[ "${SKIP_CHECKSUM}" == "true" ]]; then
+        log_warn "Skipping checksum verification (--skip-checksum)"
+        return 0
+    fi
+
+    if [[ ! -f "${checksum_file}" ]]; then
+        log_warn "No checksum file found: ${checksum_file}"
+        log_warn "Cannot verify bundle integrity"
+        return 1
+    fi
+
+    log_info "Verifying bundle checksum..."
+
+    local expected_checksum
+    expected_checksum=$(cat "${checksum_file}" | awk '{print $1}')
+
+    local actual_checksum
+    actual_checksum=$(sha256sum "${bundle_path}" | awk '{print $1}')
+
+    if [[ "${expected_checksum}" != "${actual_checksum}" ]]; then
+        log_error "Checksum mismatch!"
+        log_error "Expected: ${expected_checksum}"
+        log_error "Actual:   ${actual_checksum}"
+        return 1
+    fi
+
+    log_success "Checksum verified"
+    return 0
+}
+
+extract_bundle() {
+    local bundle_path="$1"
+    local extract_dir="$2"
+
+    log_info "Extracting bundle..."
+
+    mkdir -p "${extract_dir}"
+
+    if [[ "${bundle_path}" == *.tar.gz ]]; then
+        tar -xzf "${bundle_path}" -C "${extract_dir}" --strip-components=1
+    elif [[ "${bundle_path}" == *.tar ]]; then
+        tar -xf "${bundle_path}" -C "${extract_dir}" --strip-components=1
+    else
+        log_error "Unknown archive format: ${bundle_path}"
+        return 1
+    fi
+
+    log_success "Bundle extracted to: ${extract_dir}"
+    return 0
+}
+
+validate_bundle_structure() {
+    local bundle_dir="$1"
+
+    log_info "Validating bundle structure..."
+
+    local required_files=(
+        "bundle_manifest.json"
+        "BILL_OF_MATERIALS.json"
+    )
+
+    local required_dirs=(
+        "repos"
+    )
+
+    for file in "${required_files[@]}"; do
+        if [[ ! -f "${bundle_dir}/${file}" ]]; then
+            log_error "Missing required file: ${file}"
+            return 1
+        fi
+    done
+
+    for dir in "${required_dirs[@]}"; do
+        if [[ ! -d "${bundle_dir}/${dir}" ]]; then
+            log_error "Missing required directory: ${dir}"
+            return 1
+        fi
+    done
+
+    # Validate JSON files
+    if ! jq empty "${bundle_dir}/bundle_manifest.json" 2>/dev/null; then
+        log_error "Invalid bundle_manifest.json"
+        return 1
+    fi
+
+    if ! jq empty "${bundle_dir}/BILL_OF_MATERIALS.json" 2>/dev/null; then
+        log_error "Invalid BILL_OF_MATERIALS.json"
+        return 1
+    fi
+
+    log_success "Bundle structure valid"
+    return 0
+}
+
+get_bundle_info() {
+    local bundle_dir="$1"
+    local manifest="${bundle_dir}/bundle_manifest.json"
+
+    local bundle_name
+    local bundle_version
+    local created_at
+
+    bundle_name=$(jq -r '.bundle_name' "${manifest}")
+    bundle_version=$(jq -r '.bundle_version' "${manifest}")
+    created_at=$(jq -r '.created_at' "${manifest}")
+
+    log_info "Bundle Name: ${bundle_name}"
+    log_info "Bundle Version: ${bundle_version}"
+    log_info "Created: ${created_at}"
+
+    # Count repos and packages
+    local repo_count
+    local pkg_count
+    repo_count=$(jq -r '.repository_count' "${manifest}")
+    pkg_count=$(jq -r '.package_count' "${manifest}")
+
+    log_info "Repositories: ${repo_count}"
+    log_info "Packages: ${pkg_count}"
+}
+
+create_import_record() {
+    local bundle_dir="$1"
+    local bundle_name="$2"
+
+    local record_file="${bundle_dir}/.import_record"
+
+    cat > "${record_file}" << RECORD
+{
+    "imported_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+    "imported_by": "$(whoami)",
+    "source_path": "${BUNDLE_PATH}",
+    "status": "imported",
+    "verified": false
+}
+RECORD
+
+    log_info "Import record created"
+}
+
+main() {
+    parse_args "$@"
+
+    log_section "Import Bundle"
+
+    # Validate input
+    if [[ ! -f "${BUNDLE_PATH}" ]]; then
+        log_error "Bundle file not found: ${BUNDLE_PATH}"
+        exit 1
+    fi
+
+    ensure_directories
+
+    # Get bundle name from filename
+    local bundle_filename
+    bundle_filename=$(basename "${BUNDLE_PATH}")
+    bundle_filename="${bundle_filename%.tar.gz}"
+    bundle_filename="${bundle_filename%.tar}"
+
+    log_info "Importing bundle: ${bundle_filename}"
+
+    # Verify checksum
+    verify_bundle_checksum "${BUNDLE_PATH}" || true
+
+    # Copy signature file if exists
+    local sig_file="${BUNDLE_PATH}.asc"
+    local checksum_file="${BUNDLE_PATH}.sha256"
+
+    # Extract bundle
+    local extract_dir="${INCOMING_DIR}/${bundle_filename}"
+
+    if [[ -d "${extract_dir}" ]]; then
+        log_warn "Bundle already exists in incoming: ${extract_dir}"
+        log_warn "Removing existing bundle..."
+        rm -rf "${extract_dir}"
+    fi
+
+    extract_bundle "${BUNDLE_PATH}" "${extract_dir}"
+
+    # Copy verification files
+    if [[ -f "${sig_file}" ]]; then
+        cp "${sig_file}" "${extract_dir}/.bundle_signature.asc"
+        log_info "Signature file copied"
+    fi
+
+    if [[ -f "${checksum_file}" ]]; then
+        cp "${checksum_file}" "${extract_dir}/.bundle_checksum.sha256"
+    fi
+
+    # Validate structure
+    validate_bundle_structure "${extract_dir}"
+
+    # Show bundle info
+    get_bundle_info "${extract_dir}"
+
+    # Create import record
+    create_import_record "${extract_dir}" "${bundle_filename}"
+
+    log_section "Import Complete"
+    log_success "Bundle imported to: ${extract_dir}"
+    log_info "Next step: make verify"
+
+    log_audit "BUNDLE_IMPORTED" "Imported bundle ${bundle_filename} from ${BUNDLE_PATH}"
+}
+
+main "$@"

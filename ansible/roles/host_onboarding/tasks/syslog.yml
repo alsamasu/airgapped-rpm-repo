@@ -1,0 +1,94 @@
+---
+# ansible/roles/host_onboarding/tasks/syslog.yml
+# Configure rsyslog TLS forwarding (SERVER-AUTH ONLY)
+
+- name: Ensure rsyslog packages are installed
+  ansible.builtin.dnf:
+    name:
+      - rsyslog
+      - rsyslog-gnutls
+    state: present
+
+- name: Create syslog PKI directory
+  ansible.builtin.file:
+    path: "{{ syslog_tls_ca_bundle_path | dirname }}"
+    state: directory
+    mode: '0755'
+
+- name: Check if syslog CA certificate exists
+  ansible.builtin.stat:
+    path: "{{ syslog_tls_ca_bundle_path }}"
+  register: syslog_ca_stat
+
+- name: Download syslog CA from repository (if available)
+  ansible.builtin.get_url:
+    url: "{{ internal_repo_url }}/keys/syslog-ca.crt"
+    dest: "{{ syslog_tls_ca_bundle_path }}"
+    mode: '0644'
+    validate_certs: false
+  when: not syslog_ca_stat.stat.exists
+  register: ca_download
+  failed_when: false
+
+- name: Deploy rsyslog TLS forwarding configuration
+  ansible.builtin.template:
+    src: 60-tls-forward.conf.j2
+    dest: /etc/rsyslog.d/60-tls-forward.conf
+    mode: '0644'
+    owner: root
+    group: root
+  notify: Restart rsyslog
+
+- name: Deploy host identity logging
+  ansible.builtin.template:
+    src: 50-host-identity.conf.j2
+    dest: /etc/rsyslog.d/50-host-identity.conf
+    mode: '0644'
+    owner: root
+    group: root
+  notify: Restart rsyslog
+
+- name: Check if systemd is available
+  ansible.builtin.stat:
+    path: /run/systemd/system
+  register: systemd_check
+
+- name: Ensure rsyslog is enabled and running (systemd)
+  ansible.builtin.systemd:
+    name: rsyslog
+    enabled: true
+    state: started
+  when: systemd_check.stat.exists | default(false)
+
+- name: Start rsyslog directly (container/non-systemd)
+  ansible.builtin.shell: |
+    pkill rsyslogd 2>/dev/null || true
+    rsyslogd
+  changed_when: false
+  when: not (systemd_check.stat.exists | default(false))
+
+- name: Flush handlers to apply rsyslog config
+  ansible.builtin.meta: flush_handlers
+
+- name: Test syslog connectivity
+  ansible.builtin.wait_for:
+    host: "{{ syslog_tls_target_host }}"
+    port: "{{ syslog_tls_target_port }}"
+    timeout: 10
+  register: syslog_connectivity
+  failed_when: false
+
+- name: Send test syslog message
+  ansible.builtin.shell: |
+    logger -t onboarding "Host {{ effective_host_id }} onboarding syslog test"
+  changed_when: false
+  when: syslog_connectivity is succeeded
+
+- name: Display syslog configuration status
+  ansible.builtin.debug:
+    msg: |
+      Syslog TLS configuration:
+      - Target: {{ syslog_tls_target_host }}:{{ syslog_tls_target_port }}
+      - CA Certificate: {{ 'Present' if syslog_ca_stat.stat.exists or (ca_download is succeeded) else 'Missing - manual deploy required' }}
+      - Connectivity: {{ 'OK' if syslog_connectivity is succeeded else 'Unreachable' }}
+      - Mode: Server-auth only (no mTLS)

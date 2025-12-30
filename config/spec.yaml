@@ -1,0 +1,237 @@
+# config/spec.yaml
+# Airgapped RPM Repository System - Operator Configuration
+#
+# This file is the SINGLE SOURCE OF TRUTH for all deployment inputs.
+# Fill in all required fields before running any automation.
+#
+# Usage:
+#   1. Copy this file and fill in your environment-specific values
+#   2. Run: make validate-spec
+#   3. Run: make servers-deploy
+#
+# All sensitive values (passwords) should be changed after initial deployment.
+
+# =============================================================================
+# VMware vCenter/ESXi Connection
+# =============================================================================
+vcenter:
+  # vCenter or ESXi host address (IP or FQDN)
+  server: "vcenter.example.local"
+  
+  # Datacenter name (required for vCenter; ignored for ESXi direct connection)
+  datacenter: "Datacenter"
+  
+  # Cluster name OR specific ESXi host
+  # Use cluster for vCenter, or host for ESXi direct connection
+  cluster: "Cluster01"
+  # host: "esxi01.example.local"  # Alternative: direct ESXi host
+  
+  # Datastore for VM storage
+  datastore: "datastore1"
+  
+  # Optional: VM folder path (e.g., "Infrastructure/RPM-Servers")
+  folder: ""
+  
+  # Optional: Resource pool name
+  resource_pool: ""
+  
+  # Credentials (will be prompted if not set; can use environment variables)
+  # Use VMWARE_USER and VMWARE_PASSWORD environment variables for security
+  # username: ""
+  # password: ""
+
+# =============================================================================
+# Network Configuration
+# =============================================================================
+network:
+  # Port group name for VM network adapters
+  portgroup_name: "LAN"
+  
+  # Network uses DHCP (static IP assignment not supported in automated install)
+  # After deployment, IPs are reported via make servers-report
+  dhcp: true
+
+# =============================================================================
+# ISO Paths
+# =============================================================================
+isos:
+  # Path to RHEL 9.6 ISO
+  # Can be local filesystem path or datastore path
+  # Local: "/path/to/rhel-9.6-x86_64-dvd.iso"
+  # Datastore: "[datastore1] isos/rhel-9.6-x86_64-dvd.iso"
+  rhel96_iso_path: "/isos/rhel-9.6-x86_64-dvd.iso"
+  
+  # Datastore folder where ISOs will be uploaded/stored
+  iso_datastore_folder: "isos"
+
+# =============================================================================
+# VM Names and Sizing
+# =============================================================================
+vm_names:
+  # External RPM server (internet-connected, syncs from Red Hat)
+  rpm_external: "rpm-external"
+  
+  # Internal RPM server (airgapped, publishes to managed hosts)
+  rpm_internal: "rpm-internal"
+
+vm_sizing:
+  external:
+    cpu: 2
+    memory_gb: 8
+    disk_gb: 200
+  internal:
+    cpu: 2
+    memory_gb: 8
+    disk_gb: 200
+
+# =============================================================================
+# Bootstrap Credentials
+# =============================================================================
+# These are used ONLY during initial OS installation.
+# Change passwords after deployment for production use.
+credentials:
+  # Root password for initial access (will be set during kickstart)
+  initial_root_password: "ChangeMe123!"
+  
+  # Admin user for day-to-day operations (optional but recommended)
+  initial_admin_user: "admin"
+  initial_admin_password: "ChangeMe123!"
+
+# =============================================================================
+# Internal Server Services Configuration
+# =============================================================================
+internal_services:
+  # Unprivileged user for running podman containers and services
+  service_user: "rpmops"
+  
+  # Directories for airgap infrastructure
+  # These are created during kickstart with correct ownership
+  data_dir: "/srv/airgap/data"
+  certs_dir: "/srv/airgap/certs"
+  ansible_dir: "/srv/airgap/ansible"
+
+# =============================================================================
+# HTTPS Repository Configuration
+# =============================================================================
+https_internal_repo:
+  # Hostname for the internal repository (used in certificates and repo URLs)
+  # If empty, uses vm_names.rpm_internal
+  hostname: ""
+  
+  # HTTPS port for repository access
+  https_port: 8443
+  
+  # HTTP port (for health checks and redirects)
+  http_port: 8080
+  
+  # Self-signed certificate configuration
+  # Used for initial bootstrap; replace with CA-signed cert later
+  self_signed:
+    # Certificate subject fields
+    country: "US"
+    state: "Virginia"
+    locality: "Arlington"
+    organization: "Airgap Ops"
+    organizational_unit: "Infrastructure"
+    # Common Name - defaults to hostname if empty
+    common_name: ""
+    # Subject Alternative Names (SANs)
+    # Include IP addresses and hostnames that will be used to access the repo
+    # Example: ["192.168.1.100", "rpm-internal.local"]
+    san_entries: []
+    # Certificate validity in days
+    validity_days: 365
+
+# =============================================================================
+# Syslog TLS Forwarding Configuration
+# =============================================================================
+# Server-auth TLS only (hosts verify server certificate, no client certs)
+syslog_tls:
+  # Syslog server hostname or IP
+  target_host: "syslog.example.local"
+  
+  # Syslog TLS port (default: 6514)
+  target_port: 6514
+  
+  # Path to CA bundle file (on operator workstation) for trusting syslog server
+  # This file will be distributed to managed hosts
+  ca_bundle_local_path: "/path/to/syslog-ca-bundle.crt"
+
+# =============================================================================
+# Ansible Configuration
+# =============================================================================
+ansible:
+  # SSH credentials for initial host access
+  # After bootstrap_ssh_keys.yml, key-based auth is used
+  ssh_username: "admin"
+  ssh_password: "ChangeMe123!"
+  
+  # Become (sudo) password if different from ssh_password
+  # become_password: ""
+  
+  # Host inventory for onboarding
+  # These hosts will be configured to use the internal RPM repository
+  host_inventory:
+    # RHEL 9 hosts
+    rhel9_hosts:
+      - hostname_or_ip: "192.168.1.50"
+        airgap_host_id: "app-server-01"
+        os_profile: "rhel9"
+        
+      - hostname_or_ip: "192.168.1.51"
+        airgap_host_id: "app-server-02"
+        os_profile: "rhel9"
+    
+    # RHEL 8 hosts
+    rhel8_hosts:
+      - hostname_or_ip: "192.168.1.60"
+        airgap_host_id: "legacy-app-01"
+        os_profile: "rhel8"
+
+# =============================================================================
+# Optional: CA-Signed Certificates (for production)
+# =============================================================================
+# After initial deployment, replace self-signed certs with CA-signed
+# Use: make replace-tls-cert
+# ca_signed_certs:
+#   # Path to CA-signed certificate (PEM format)
+#   cert_path: "/path/to/rpm-internal.crt"
+#   # Path to private key (PEM format)
+#   key_path: "/path/to/rpm-internal.key"
+#   # Path to CA certificate chain (optional)
+#   ca_chain_path: "/path/to/ca-chain.crt"
+
+# =============================================================================
+# Lifecycle Environments
+# =============================================================================
+lifecycle:
+  # Default lifecycle environment for managed hosts
+  default_env: "stable"
+  
+  # Available environments
+  environments:
+    - "testing"
+    - "stable"
+
+# =============================================================================
+# OpenSCAP and STIG Configuration
+# =============================================================================
+compliance:
+  # Enable FIPS mode on internal VM (requires reboot)
+  enable_fips: true
+  
+  # STIG profile to apply
+  stig_profile: "xccdf_org.ssgproject.content_profile_stig"
+  
+  # Generate STIG checklist (CKL) files
+  generate_ckl: true
+
+# =============================================================================
+# Manifest Collection
+# =============================================================================
+manifests:
+  # Local directory for storing collected manifests
+  output_dir: "./artifacts/manifests"
+  
+  # Include full package details (larger files)
+  include_full_details: true

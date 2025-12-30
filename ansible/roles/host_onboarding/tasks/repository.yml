@@ -1,0 +1,90 @@
+---
+# ansible/roles/host_onboarding/tasks/repository.yml
+# Configure internal RPM repository
+
+- name: Set repository variables
+  ansible.builtin.set_fact:
+    repo_base_url: "{{ internal_repo_url }}/lifecycle/{{ repo_lifecycle_env }}"
+    gpg_key_url: "{{ internal_repo_url }}/keys/RPM-GPG-KEY-internal"
+    effective_repo_profile: "{{ repo_profile | default('rhel' + ansible_distribution_major_version) }}"
+
+- name: Ensure PKI directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /etc/pki/rpm-gpg
+    - /etc/pki/tls/certs
+
+- name: Download GPG key from internal repository
+  ansible.builtin.get_url:
+    url: "{{ gpg_key_url }}"
+    dest: /etc/pki/rpm-gpg/RPM-GPG-KEY-internal
+    mode: '0644'
+    validate_certs: false
+  register: gpg_download
+  retries: "{{ connectivity_retry_count }}"
+  delay: "{{ connectivity_retry_delay }}"
+  until: gpg_download is succeeded
+  ignore_errors: true
+
+- name: Import GPG key
+  ansible.builtin.rpm_key:
+    key: /etc/pki/rpm-gpg/RPM-GPG-KEY-internal
+    state: present
+  when: gpg_download is succeeded
+  ignore_errors: true
+
+- name: Backup existing repo configurations
+  ansible.builtin.shell: |
+    mkdir -p /etc/yum.repos.d.backup
+    cp /etc/yum.repos.d/*.repo /etc/yum.repos.d.backup/ 2>/dev/null || true
+  changed_when: false
+  when: onboard_disable_external_repos | bool
+
+- name: Disable external repositories
+  ansible.builtin.shell: |
+    for repo in /etc/yum.repos.d/*.repo; do
+      if [[ -f "$repo" ]] && [[ "$(basename "$repo")" != "internal.repo" ]]; then
+        sed -i 's/^enabled=1/enabled=0/' "$repo"
+      fi
+    done
+  when: onboard_disable_external_repos | bool
+  changed_when: false
+
+- name: Deploy internal repository configuration
+  ansible.builtin.template:
+    src: internal.repo.j2
+    dest: /etc/yum.repos.d/internal.repo
+    mode: '0644'
+    backup: true
+
+- name: Clean DNF cache
+  ansible.builtin.command: dnf clean all
+  changed_when: false
+
+- name: Refresh repository metadata
+  ansible.builtin.command: dnf makecache
+  register: makecache
+  changed_when: false
+  failed_when: false
+  retries: "{{ connectivity_retry_count }}"
+  delay: "{{ connectivity_retry_delay }}"
+  until: makecache.rc == 0
+
+- name: Test repository access
+  ansible.builtin.command: dnf repolist
+  register: repolist
+  changed_when: false
+  failed_when: false
+
+- name: Display repository status
+  ansible.builtin.debug:
+    msg: |
+      Repository configuration:
+      - Profile: {{ effective_repo_profile }}
+      - Lifecycle: {{ repo_lifecycle_env }}
+      - Base URL: {{ repo_base_url }}
+      - GPG Key: {{ 'Imported' if gpg_download is succeeded else 'Failed/Skipped' }}
+      - Status: {{ 'OK' if makecache.rc == 0 else 'Connectivity issues' }}

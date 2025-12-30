@@ -1,0 +1,85 @@
+---
+# ansible/roles/manifest_collector/tasks/main.yml
+# Collect package manifest from host
+#
+# Gathers installed packages, enabled repos, and system info.
+
+- name: Determine host identity
+  ansible.builtin.set_fact:
+    effective_host_id: "{{ airgap_host_id | default(ansible_machine_id | default(inventory_hostname)) }}"
+    
+- name: Get installed packages
+  ansible.builtin.command: >
+    rpm -qa --queryformat '%{NAME}|%{EPOCH}|%{VERSION}|%{RELEASE}|%{ARCH}|%{INSTALLTIME}\n'
+  register: rpm_packages
+  changed_when: false
+  
+- name: Parse package list
+  ansible.builtin.set_fact:
+    installed_packages: "{{ installed_packages | default([]) + [item | community.general.dict_kv_to_list | community.general.from_items(['name', 'epoch', 'version', 'release', 'arch', 'installtime']) | from_items] }}"
+  loop: "{{ rpm_packages.stdout_lines }}"
+  vars:
+    package_parts: "{{ item.split('|') }}"
+  when: item | length > 0
+  
+- name: Build package list (simplified)
+  ansible.builtin.set_fact:
+    installed_packages: >-
+      {{
+        rpm_packages.stdout_lines | 
+        select('match', '.+') |
+        map('regex_replace', '^(.+)\|(.+)\|(.+)\|(.+)\|(.+)\|(.+)$', 
+            '{"name": "\1", "epoch": "\2", "version": "\3", "release": "\4", "arch": "\5", "installtime": "\6"}') |
+        map('from_json') |
+        list
+      }}
+  ignore_errors: true
+  
+- name: Get enabled repositories
+  ansible.builtin.command: dnf repolist enabled --quiet
+  register: enabled_repos
+  changed_when: false
+  ignore_errors: true
+  
+- name: Create manifest structure
+  ansible.builtin.set_fact:
+    host_manifest:
+      host_id: "{{ effective_host_id }}"
+      hostname: "{{ ansible_hostname }}"
+      fqdn: "{{ ansible_fqdn }}"
+      collected_at: "{{ ansible_date_time.iso8601 }}"
+      os_release:
+        id: "{{ ansible_distribution | lower }}"
+        version: "{{ ansible_distribution_version }}"
+        name: "{{ ansible_distribution }}"
+        pretty_name: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+      kernel: "{{ ansible_kernel }}"
+      arch: "{{ ansible_architecture }}"
+      package_count: "{{ rpm_packages.stdout_lines | length }}"
+      packages: "{{ installed_packages | default([]) }}"
+      repos: "{{ enabled_repos.stdout_lines | default([]) }}"
+      
+- name: Create local manifest directory
+  ansible.builtin.file:
+    path: "{{ manifest_dir }}/{{ effective_host_id }}"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+  
+- name: Write manifest to file
+  ansible.builtin.copy:
+    content: "{{ host_manifest | to_nice_json }}"
+    dest: "{{ manifest_dir }}/{{ effective_host_id }}/manifest.json"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+  
+- name: Display manifest summary
+  ansible.builtin.debug:
+    msg: |
+      Manifest collected:
+      - Host ID: {{ effective_host_id }}
+      - OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+      - Packages: {{ rpm_packages.stdout_lines | length }}
+      - Saved to: {{ manifest_dir }}/{{ effective_host_id }}/manifest.json

@@ -1,0 +1,201 @@
+#!/bin/bash
+# logging.sh - Common logging functions for Airgapped RPM Repository System
+#
+# Usage: source this file to get logging functions
+#
+# Functions:
+#   log_info    - Informational message (blue)
+#   log_success - Success message (green)
+#   log_warn    - Warning message (yellow)
+#   log_error   - Error message (red)
+#   log_debug   - Debug message (only if DEBUG=1)
+#   log_audit   - Audit log entry (timestamped, for compliance)
+
+# Prevent double-sourcing
+if [[ -n "${_LOGGING_SH_LOADED:-}" ]]; then
+    return 0
+fi
+_LOGGING_SH_LOADED=1
+
+# Color codes
+readonly LOG_RED='\033[0;31m'
+readonly LOG_GREEN='\033[0;32m'
+readonly LOG_YELLOW='\033[0;33m'
+readonly LOG_BLUE='\033[0;34m'
+readonly LOG_PURPLE='\033[0;35m'
+readonly LOG_CYAN='\033[0;36m'
+readonly LOG_NC='\033[0m'
+
+# Log file configuration
+LOG_DIR="${RPMSERVER_LOG_DIR:-/var/log/rpmserver}"
+LOG_FILE="${LOG_DIR}/rpmserver.log"
+AUDIT_LOG_FILE="${LOG_DIR}/audit.log"
+
+# Ensure log directory exists
+_ensure_log_dir() {
+    if [[ ! -d "${LOG_DIR}" ]]; then
+        mkdir -p "${LOG_DIR}" 2>/dev/null || true
+    fi
+}
+
+# Get ISO 8601 timestamp
+_timestamp() {
+    date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
+
+# Get caller information for audit logging
+_caller_info() {
+    local frame="${1:-1}"
+    local func="${FUNCNAME[$((frame + 1))]:-main}"
+    local line="${BASH_LINENO[$frame]:-0}"
+    local file="${BASH_SOURCE[$((frame + 1))]:-unknown}"
+    file=$(basename "${file}")
+    echo "${file}:${line}:${func}"
+}
+
+# Write to log file (non-blocking)
+_write_log() {
+    local level="$1"
+    local message="$2"
+    _ensure_log_dir
+    local timestamp
+    timestamp=$(_timestamp)
+    echo "${timestamp} [${level}] ${message}" >> "${LOG_FILE}" 2>/dev/null || true
+}
+
+# Write to audit log (for compliance tracking)
+_write_audit() {
+    local action="$1"
+    local message="$2"
+    local caller="$3"
+    local user="${USER:-unknown}"
+    _ensure_log_dir
+    local timestamp
+    timestamp=$(_timestamp)
+    local audit_entry
+    audit_entry=$(cat << EOF
+{"timestamp":"${timestamp}","user":"${user}","action":"${action}","message":"${message}","caller":"${caller}"}
+EOF
+)
+    echo "${audit_entry}" >> "${AUDIT_LOG_FILE}" 2>/dev/null || true
+}
+
+# Log informational message
+log_info() {
+    local message="$*"
+    echo -e "${LOG_BLUE}[INFO]${LOG_NC} ${message}"
+    _write_log "INFO" "${message}"
+}
+
+# Log success message
+log_success() {
+    local message="$*"
+    echo -e "${LOG_GREEN}[SUCCESS]${LOG_NC} ${message}"
+    _write_log "SUCCESS" "${message}"
+}
+
+# Log warning message
+log_warn() {
+    local message="$*"
+    echo -e "${LOG_YELLOW}[WARN]${LOG_NC} ${message}" >&2
+    _write_log "WARN" "${message}"
+}
+
+# Log error message
+log_error() {
+    local message="$*"
+    echo -e "${LOG_RED}[ERROR]${LOG_NC} ${message}" >&2
+    _write_log "ERROR" "${message}"
+}
+
+# Log debug message (only if DEBUG=1)
+log_debug() {
+    if [[ "${DEBUG:-0}" == "1" ]]; then
+        local message="$*"
+        echo -e "${LOG_PURPLE}[DEBUG]${LOG_NC} ${message}"
+        _write_log "DEBUG" "${message}"
+    fi
+}
+
+# Log audit entry (for compliance tracking)
+# Usage: log_audit "ACTION_TYPE" "description of action"
+log_audit() {
+    local action="$1"
+    shift
+    local message="$*"
+    local caller
+    caller=$(_caller_info 1)
+    echo -e "${LOG_CYAN}[AUDIT]${LOG_NC} ${action}: ${message}"
+    _write_audit "${action}" "${message}" "${caller}"
+}
+
+# Log section header
+log_section() {
+    local title="$*"
+    local width=60
+    local padding=$(( (width - ${#title} - 2) / 2 ))
+    local line
+    line=$(printf '=%.0s' $(seq 1 $width))
+    echo ""
+    echo -e "${LOG_BLUE}${line}${LOG_NC}"
+    printf "${LOG_BLUE}=%*s %s %*s=${LOG_NC}\n" $padding "" "$title" $padding ""
+    echo -e "${LOG_BLUE}${line}${LOG_NC}"
+    echo ""
+}
+
+# Log step in a multi-step process
+log_step() {
+    local step_num="$1"
+    local total_steps="$2"
+    shift 2
+    local message="$*"
+    echo -e "${LOG_BLUE}[${step_num}/${total_steps}]${LOG_NC} ${message}"
+    _write_log "STEP" "[${step_num}/${total_steps}] ${message}"
+}
+
+# Log with timestamp (for long-running operations)
+log_timed() {
+    local message="$*"
+    local timestamp
+    timestamp=$(date +"%H:%M:%S")
+    echo -e "${LOG_CYAN}[${timestamp}]${LOG_NC} ${message}"
+    _write_log "TIMED" "${message}"
+}
+
+# Fatal error - log and exit
+log_fatal() {
+    local message="$*"
+    local exit_code="${EXIT_CODE:-1}"
+    echo -e "${LOG_RED}[FATAL]${LOG_NC} ${message}" >&2
+    _write_log "FATAL" "${message}"
+    log_audit "FATAL_ERROR" "${message}"
+    exit "${exit_code}"
+}
+
+# Check if running interactively
+is_interactive() {
+    [[ -t 0 && -t 1 ]]
+}
+
+# Prompt for confirmation
+confirm() {
+    local message="${1:-Continue?}"
+    if ! is_interactive; then
+        log_warn "Non-interactive mode, assuming yes"
+        return 0
+    fi
+    read -r -p "${message} [y/N] " response
+    case "${response}" in
+        [yY][eE][sS]|[yY])
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Export functions
+export -f log_info log_success log_warn log_error log_debug log_audit
+export -f log_section log_step log_timed log_fatal
+export -f is_interactive confirm

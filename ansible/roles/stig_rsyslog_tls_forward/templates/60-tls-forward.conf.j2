@@ -1,0 +1,45 @@
+# /etc/rsyslog.d/60-tls-forward.conf
+# Rsyslog TLS forwarding configuration (SERVER-AUTH ONLY)
+#
+# Managed by Ansible - do not edit manually
+# Generated: {{ ansible_date_time.iso8601 }}
+#
+# Configuration:
+#   Target: {{ syslog_tls_target_host }}:{{ syslog_tls_target_port }}
+#   Mode: Server authentication only (NO client certificates)
+#   CA Bundle: {{ syslog_tls_ca_bundle_path }}
+
+# Load GnuTLS driver for TLS support
+module(load="omfwd")
+
+# Global TLS configuration
+global(
+    DefaultNetstreamDriver="gtls"
+    DefaultNetstreamDriverCAFile="{{ syslog_tls_ca_bundle_path }}"
+    # NO client certificate - server-auth only
+    # DefaultNetstreamDriverCertFile is NOT set
+    # DefaultNetstreamDriverKeyFile is NOT set
+)
+
+# Forward all logs to central syslog over TLS
+# Using server authentication only (anon mode for client)
+*.* action(
+    type="omfwd"
+    target="{{ syslog_tls_target_host }}"
+    port="{{ syslog_tls_target_port }}"
+    protocol="tcp"
+    StreamDriver="gtls"
+    StreamDriverMode="1"
+    StreamDriverAuthMode="anon"
+    # Queue configuration for reliability
+    queue.type="LinkedList"
+    queue.filename="syslog_tls_fwd"
+    queue.maxDiskSpace="1g"
+    queue.saveOnShutdown="on"
+    queue.size="10000"
+    action.resumeRetryCount="-1"
+    action.resumeInterval="30"
+)
+
+# Also log locally for backup
+*.* action(type="omfile" file="/var/log/messages")

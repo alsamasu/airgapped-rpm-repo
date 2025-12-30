@@ -1,0 +1,33 @@
+---
+# ansible/roles/host_onboarding/defaults/main.yml
+# Default variables for host onboarding
+
+# Host identity file location
+host_identity_file: /etc/airgap/host-identity
+
+# Pre-flight check settings
+preflight_check_connectivity: true
+preflight_check_dns: true
+preflight_check_disk_space_mb: 500
+
+# Repository configuration
+onboard_configure_repo: true
+onboard_disable_external_repos: true
+
+# Syslog TLS forwarding
+onboard_configure_syslog: true
+
+# Manifest collection
+onboard_collect_manifest: true
+manifest_dir: "{{ playbook_dir }}/../artifacts/manifests"
+
+# STIG hardening (optional - disabled by default during onboarding)
+onboard_apply_stig: false
+
+# Verification settings
+onboard_verify_connectivity: true
+onboard_verify_packages: true
+
+# Retry settings for connectivity tests
+connectivity_retry_count: 3
+connectivity_retry_delay: 5

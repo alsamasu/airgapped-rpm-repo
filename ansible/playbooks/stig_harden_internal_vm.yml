@@ -1,0 +1,82 @@
+---
+# ansible/playbooks/stig_harden_internal_vm.yml
+# STIG hardening playbook for internal VM
+#
+# Applies STIG security controls including:
+# - Base system hardening
+# - Audit configuration
+# - Rsyslog TLS forwarding (server-auth only, no mTLS)
+# - FIPS mode validation
+#
+# Usage:
+#   ansible-playbook playbooks/stig_harden_internal_vm.yml
+#   ansible-playbook playbooks/stig_harden_internal_vm.yml --tags rsyslog
+#   ansible-playbook playbooks/stig_harden_internal_vm.yml -e syslog_tls_target_host=10.0.0.50
+
+- name: STIG Hardening for Internal VM
+  hosts: managed_hosts
+  gather_facts: true
+  
+  vars:
+    # Syslog TLS configuration (server-auth only, NO client certs/mTLS)
+    syslog_tls_target_host: "{{ lookup('env', 'SYSLOG_TLS_TARGET_HOST') | default('syslog-sink', true) }}"
+    syslog_tls_target_port: "{{ lookup('env', 'SYSLOG_TLS_TARGET_PORT') | default(6514, true) }}"
+    syslog_tls_ca_bundle_path: /etc/pki/tls/certs/syslog-ca.crt
+    
+    # STIG settings
+    stig_enable_fips: false  # Set true if FIPS mode required
+    stig_audit_rules_file: /etc/audit/rules.d/stig.rules
+    
+  pre_tasks:
+    - name: Display STIG hardening configuration
+      ansible.builtin.debug:
+        msg: |
+          STIG Hardening Configuration
+          ============================
+          Target host: {{ inventory_hostname }}
+          Host ID: {{ airgap_host_id | default(ansible_machine_id) }}
+          
+          Syslog TLS Configuration (Server-Auth Only):
+          - Target: {{ syslog_tls_target_host }}:{{ syslog_tls_target_port }}
+          - CA Bundle: {{ syslog_tls_ca_bundle_path }}
+          - Client Certs: DISABLED (server-auth only)
+          
+          FIPS Mode: {{ stig_enable_fips }}
+          
+  roles:
+    - role: stig_base
+      tags: [stig, base]
+      
+    - role: stig_audit
+      tags: [stig, audit]
+      
+    - role: stig_rsyslog_tls_forward
+      tags: [stig, rsyslog, syslog]
+      
+    - role: stig_fips_validation
+      tags: [stig, fips]
+      when: stig_enable_fips | bool
+      
+  post_tasks:
+    - name: Generate STIG compliance evidence
+      ansible.builtin.shell: |
+        mkdir -p /var/log/stig-evidence
+        echo "STIG Hardening Applied: $(date -Iseconds)" > /var/log/stig-evidence/hardening-timestamp.txt
+        ausearch -m USER_AUTH,USER_ACCT -ts today 2>/dev/null > /var/log/stig-evidence/audit-sample.txt || true
+        grep -E "^[^#]" /etc/rsyslog.d/*.conf 2>/dev/null > /var/log/stig-evidence/rsyslog-config.txt || true
+        cat /proc/sys/crypto/fips_enabled > /var/log/stig-evidence/fips-status.txt 2>/dev/null || echo "N/A" > /var/log/stig-evidence/fips-status.txt
+      changed_when: false
+      
+    - name: Display STIG hardening summary
+      ansible.builtin.debug:
+        msg: |
+          STIG Hardening Complete
+          =======================
+          Host: {{ inventory_hostname }}
+          Evidence saved to: /var/log/stig-evidence/
+          
+          Applied controls:
+          - Base system hardening
+          - Audit configuration
+          - Rsyslog TLS forwarding to {{ syslog_tls_target_host }}:{{ syslog_tls_target_port }}
+          {{ '- FIPS mode validation' if stig_enable_fips else '' }}

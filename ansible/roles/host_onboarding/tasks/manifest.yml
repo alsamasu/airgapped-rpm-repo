@@ -1,0 +1,72 @@
+---
+# ansible/roles/host_onboarding/tasks/manifest.yml
+# Collect initial package manifest
+
+- name: Get installed packages
+  ansible.builtin.command: >
+    rpm -qa --queryformat '%{NAME}|%{VERSION}|%{RELEASE}|%{ARCH}\n'
+  register: rpm_packages
+  changed_when: false
+
+- name: Get enabled repositories
+  ansible.builtin.command: dnf repolist enabled --quiet
+  register: enabled_repos
+  changed_when: false
+  failed_when: false
+
+- name: Build manifest structure
+  ansible.builtin.set_fact:
+    onboarding_manifest:
+      host_id: "{{ effective_host_id }}"
+      hostname: "{{ ansible_hostname }}"
+      fqdn: "{{ ansible_fqdn }}"
+      onboarded_at: "{{ ansible_date_time.iso8601 }}"
+      os:
+        distribution: "{{ ansible_distribution }}"
+        version: "{{ ansible_distribution_version }}"
+        major_version: "{{ ansible_distribution_major_version }}"
+        kernel: "{{ ansible_kernel }}"
+      architecture: "{{ ansible_architecture }}"
+      network:
+        default_ipv4: "{{ ansible_default_ipv4.address | default('N/A') }}"
+        interfaces: "{{ ansible_interfaces }}"
+      packages:
+        count: "{{ rpm_packages.stdout_lines | length }}"
+        list: "{{ rpm_packages.stdout_lines[:100] }}"
+      repos: "{{ enabled_repos.stdout_lines | default([]) }}"
+      configuration:
+        lifecycle_env: "{{ repo_lifecycle_env }}"
+        repo_profile: "{{ effective_repo_profile | default('auto') }}"
+        syslog_target: "{{ syslog_tls_target_host }}:{{ syslog_tls_target_port }}"
+
+- name: Create manifest directory on controller
+  ansible.builtin.file:
+    path: "{{ manifest_dir }}/{{ effective_host_id }}"
+    state: directory
+    mode: '0755'
+  delegate_to: localhost
+  become: false
+
+- name: Write onboarding manifest
+  ansible.builtin.copy:
+    content: "{{ onboarding_manifest | to_nice_json }}"
+    dest: "{{ manifest_dir }}/{{ effective_host_id }}/onboarding.json"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+
+- name: Write full package list
+  ansible.builtin.copy:
+    content: "{{ rpm_packages.stdout }}"
+    dest: "{{ manifest_dir }}/{{ effective_host_id }}/packages.txt"
+    mode: '0644'
+  delegate_to: localhost
+  become: false
+
+- name: Display manifest summary
+  ansible.builtin.debug:
+    msg: |
+      Manifest collected:
+      - Host ID: {{ effective_host_id }}
+      - Packages: {{ rpm_packages.stdout_lines | length }}
+      - Saved to: {{ manifest_dir }}/{{ effective_host_id }}/

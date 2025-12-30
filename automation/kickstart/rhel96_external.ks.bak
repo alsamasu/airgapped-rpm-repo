@@ -1,0 +1,161 @@
+#version=RHEL9
+# Kickstart for External RPM Server (RHEL 9.6)
+# This server is internet-connected and syncs from Red Hat CDN.
+#
+# Generated from spec.yaml template
+# Placeholders: {{HOSTNAME}}, {{ROOT_PASSWORD}}, {{ADMIN_USER}}, {{ADMIN_PASSWORD}}
+
+# Installation method
+text
+cdrom
+
+# System language and keyboard
+lang en_US.UTF-8
+keyboard --xlayouts='us'
+
+# Network configuration (DHCP)
+network --bootproto=dhcp --device=link --activate --onboot=yes
+network --hostname={{HOSTNAME}}
+
+# Security
+firewall --enabled --service=ssh --service=http --service=https
+selinux --enforcing
+
+# Root password
+rootpw --plaintext {{ROOT_PASSWORD}}
+
+# Admin user with sudo access
+user --name={{ADMIN_USER}} --password={{ADMIN_PASSWORD}} --plaintext --groups=wheel
+
+# Timezone
+timezone America/New_York --utc
+timesource --ntp-server=time.nist.gov
+
+# Bootloader configuration
+bootloader --location=mbr --append="crashkernel=auto"
+
+# Disk partitioning
+zerombr
+clearpart --all --initlabel --disklabel=gpt
+
+# UEFI partition
+part /boot/efi --fstype="efi" --size=600
+
+# Boot partition
+part /boot --fstype="xfs" --size=1024
+
+# LVM physical volume
+part pv.01 --fstype="lvmpv" --size=1 --grow
+
+# Volume group
+volgroup vg_root pv.01
+
+# Logical volumes
+logvol / --fstype="xfs" --size=30720 --name=lv_root --vgname=vg_root
+logvol /var --fstype="xfs" --size=20480 --name=lv_var --vgname=vg_root
+logvol /var/log --fstype="xfs" --size=10240 --name=lv_log --vgname=vg_root
+logvol /var/log/audit --fstype="xfs" --size=5120 --name=lv_audit --vgname=vg_root
+logvol /home --fstype="xfs" --size=10240 --name=lv_home --vgname=vg_root
+logvol /data --fstype="xfs" --size=1 --grow --name=lv_data --vgname=vg_root
+logvol swap --fstype="swap" --size=4096 --name=lv_swap --vgname=vg_root
+
+# Package selection
+skipx
+%packages
+@^minimal-environment
+# Core utilities
+vim-enhanced
+tmux
+git
+wget
+curl
+rsync
+tar
+unzip
+
+# System administration
+sudo
+openssh-server
+openssh-clients
+chrony
+
+# Security and auditing
+audit
+rsyslog
+policycoreutils-python-utils
+setools-console
+
+# Repository tools
+createrepo_c
+dnf-utils
+yum-utils
+
+# Signing and verification
+gnupg2
+rpm-sign
+
+# Python for automation
+python3
+python3-pip
+
+# Firewall
+firewalld
+nftables
+%end
+
+# Post-installation script
+%post --log=/root/ks-post.log
+#!/bin/bash
+set -euo pipefail
+
+echo "=== Post-installation configuration for External RPM Server ==="
+
+# Set hostname
+hostnamectl set-hostname {{HOSTNAME}}
+
+# Configure SSH
+echo "Configuring SSH..."
+sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+sed -i 's/^#*PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+
+# Configure sudo for admin user
+echo "Configuring sudo..."
+echo '%wheel ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/wheel-nopasswd
+chmod 440 /etc/sudoers.d/wheel-nopasswd
+
+# Create data directories
+echo "Creating data directories..."
+mkdir -p /data/{repos,export,gpg,logs,manifests}
+chown -R {{ADMIN_USER}}:{{ADMIN_USER}} /data
+
+# Record role
+echo "external-rpm-server" > /etc/airgap-role
+echo "{{HOSTNAME}}" > /etc/hostname
+
+# Configure firewall
+echo "Configuring firewall..."
+systemctl enable firewalld
+systemctl start firewalld || true
+firewall-cmd --permanent --add-service=ssh || true
+firewall-cmd --permanent --add-service=http || true
+firewall-cmd --permanent --add-service=https || true
+firewall-cmd --reload || true
+
+# Enable services
+echo "Enabling services..."
+systemctl enable sshd
+systemctl enable chronyd
+systemctl enable rsyslog
+systemctl enable auditd
+
+# Create marker file for completion detection
+echo "Creating completion marker..."
+touch /root/.ks-install-complete
+echo "Installation completed: $(date -Iseconds)" > /root/.ks-install-complete
+
+echo "=== Post-installation complete ==="
+%end
+
+# Reboot after installation
+reboot --eject

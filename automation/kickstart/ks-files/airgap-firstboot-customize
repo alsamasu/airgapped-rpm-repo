@@ -1,0 +1,167 @@
+#!/bin/bash
+# /usr/local/sbin/airgap-firstboot-customize
+# First-boot customization for Airgapped RPM Repository OVA deployments
+#
+# Reads OVF properties from VMware guestinfo and applies:
+# - Hostname configuration
+# - Network configuration (DHCP or static)
+#
+# This script runs once at first boot and then disables itself.
+
+set -euo pipefail
+
+LOG_FILE="/var/log/airgap-firstboot.log"
+MARKER_FILE="/var/lib/airgap-firstboot-done"
+
+log() {
+    local ts=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[$ts] $*" | tee -a "$LOG_FILE"
+}
+
+# Check if already run
+if [[ -f "$MARKER_FILE" ]]; then
+    log "First-boot customization already completed. Exiting."
+    exit 0
+fi
+
+log "Starting airgap first-boot customization"
+
+# Function to get guestinfo property
+get_guestinfo() {
+    local key=$1
+    local default=${2:-""}
+    local value=""
+    
+    # Try vmtoolsd first (preferred)
+    if command -v vmtoolsd &> /dev/null; then
+        value=$(vmtoolsd --cmd "info-get guestinfo.ovfenv.$key" 2>/dev/null || true)
+    fi
+    
+    # Fallback to vmware-rpctool
+    if [[ -z "$value" ]] && command -v vmware-rpctool &> /dev/null; then
+        value=$(vmware-rpctool "info-get guestinfo.ovfenv.$key" 2>/dev/null || true)
+    fi
+    
+    # Fallback to /tmp/ovf-env.xml if VMware Tools populated it
+    if [[ -z "$value" ]] && [[ -f /tmp/ovf-env.xml ]]; then
+        value=$(grep -oP "oe:key=\"$key\"[^>]*oe:value=\"\K[^\"]*" /tmp/ovf-env.xml 2>/dev/null || true)
+    fi
+    
+    echo "${value:-$default}"
+}
+
+# Read OVF properties
+HOSTNAME_NEW=$(get_guestinfo "hostname" "")
+NETWORK_MODE=$(get_guestinfo "network.mode" "dhcp")
+IP_ADDRESS=$(get_guestinfo "network.ip" "")
+IP_PREFIX=$(get_guestinfo "network.prefix" "24")
+GATEWAY=$(get_guestinfo "network.gateway" "")
+DNS_SERVERS=$(get_guestinfo "network.dns" "")
+
+log "Configuration from OVF properties:"
+log "  Hostname:     ${HOSTNAME_NEW:-'(not set)'}"
+log "  Network Mode: $NETWORK_MODE"
+log "  IP Address:   ${IP_ADDRESS:-'(DHCP)'}"
+log "  Prefix:       $IP_PREFIX"
+log "  Gateway:      ${GATEWAY:-'(not set)'}"
+log "  DNS:          ${DNS_SERVERS:-'(not set)'}"
+
+# Apply hostname
+if [[ -n "$HOSTNAME_NEW" ]]; then
+    log "Setting hostname to: $HOSTNAME_NEW"
+    hostnamectl set-hostname "$HOSTNAME_NEW"
+    
+    # Update /etc/hosts
+    if ! grep -q "$HOSTNAME_NEW" /etc/hosts; then
+        echo "127.0.1.1 $HOSTNAME_NEW" >> /etc/hosts
+    fi
+fi
+
+# Detect primary network interface
+PRIMARY_IFACE=$(ip -o link show | awk -F': ' '$2 !~ /^(lo|virbr|docker|veth)/ {print $2; exit}')
+if [[ -z "$PRIMARY_IFACE" ]]; then
+    PRIMARY_IFACE="ens192"  # VMware default
+fi
+log "Primary network interface: $PRIMARY_IFACE"
+
+# Configure network
+if [[ "$NETWORK_MODE" == "static" && -n "$IP_ADDRESS" ]]; then
+    log "Configuring static network on $PRIMARY_IFACE"
+    
+    # Create NetworkManager connection file
+    CONN_FILE="/etc/NetworkManager/system-connections/${PRIMARY_IFACE}-static.nmconnection"
+    
+    cat > "$CONN_FILE" << EOCONN
+[connection]
+id=${PRIMARY_IFACE}-static
+type=ethernet
+interface-name=${PRIMARY_IFACE}
+autoconnect=true
+
+[ethernet]
+
+[ipv4]
+method=manual
+addresses=${IP_ADDRESS}/${IP_PREFIX}
+EOCONN
+
+    if [[ -n "$GATEWAY" ]]; then
+        echo "gateway=$GATEWAY" >> "$CONN_FILE"
+    fi
+    
+    if [[ -n "$DNS_SERVERS" ]]; then
+        echo "dns=$DNS_SERVERS" >> "$CONN_FILE"
+    fi
+    
+    cat >> "$CONN_FILE" << EOCONN
+
+[ipv6]
+method=disabled
+EOCONN
+
+    chmod 600 "$CONN_FILE"
+    
+    # Remove DHCP connection if exists
+    rm -f "/etc/NetworkManager/system-connections/${PRIMARY_IFACE}.nmconnection" 2>/dev/null || true
+    
+    # Reload NetworkManager
+    log "Reloading NetworkManager configuration"
+    nmcli connection reload
+    nmcli connection up "${PRIMARY_IFACE}-static" || true
+    
+else
+    log "Using DHCP for network configuration"
+    # Ensure DHCP is enabled (should be default from kickstart)
+    
+    # Create DHCP connection if not exists
+    if [[ ! -f "/etc/NetworkManager/system-connections/${PRIMARY_IFACE}.nmconnection" ]]; then
+        CONN_FILE="/etc/NetworkManager/system-connections/${PRIMARY_IFACE}.nmconnection"
+        cat > "$CONN_FILE" << EOCONN
+[connection]
+id=${PRIMARY_IFACE}
+type=ethernet
+interface-name=${PRIMARY_IFACE}
+autoconnect=true
+
+[ethernet]
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=disabled
+EOCONN
+        chmod 600 "$CONN_FILE"
+        nmcli connection reload
+    fi
+fi
+
+# Mark as completed
+log "First-boot customization completed successfully"
+echo "Completed: $(date -Iseconds)" > "$MARKER_FILE"
+
+# Disable the service after first run
+systemctl disable airgap-firstboot.service 2>/dev/null || true
+
+log "airgap-firstboot service disabled for future boots"
+exit 0

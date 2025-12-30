@@ -1,0 +1,14 @@
+# /etc/rsyslog.d/50-host-identity.conf
+# Add host identity to syslog messages
+#
+# Managed by Ansible - do not edit manually
+# Generated: {{ ansible_date_time.iso8601 }}
+# Host ID: {{ effective_host_id }}
+
+# Template to include host identity in messages
+template(name="AirgapFormat" type="string"
+    string="<%PRI%>%TIMESTAMP% {{ effective_host_id }} %syslogtag%%msg%\n"
+)
+
+# Apply to all forwarded messages
+# This ensures the central syslog can identify hosts by airgap_host_id

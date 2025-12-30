@@ -1,0 +1,15 @@
+[Unit]
+Description=Airgap First-Boot Customization
+After=network-online.target vmtoolsd.service
+Wants=network-online.target
+ConditionPathExists=!/var/lib/airgap-firstboot-done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/airgap-firstboot-customize
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

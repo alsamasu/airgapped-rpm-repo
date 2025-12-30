@@ -1,0 +1,789 @@
+# Airgapped RPM Repository System - Automated Operator Guide
+
+## Table of Contents
+
+1. [Inputs Required](#1-inputs-required)
+2. [Prerequisites](#2-prerequisites)
+3. [Happy Path Deployment](#3-happy-path-deployment)
+4. [External RPM Server Operations](#4-external-rpm-server-operations)
+5. [Internal RPM Server Operations](#5-internal-rpm-server-operations)
+6. [Host Onboarding](#6-host-onboarding)
+7. [Monthly Patch Cycle](#7-monthly-patch-cycle)
+8. [Certificate Management](#8-certificate-management)
+9. [Troubleshooting](#9-troubleshooting)
+10. [Remaining Manual Steps](#10-remaining-manual-steps)
+
+---
+
+## 1. Inputs Required
+
+All operator inputs are consolidated in **one configuration file**: `config/spec.yaml`
+
+### Required Files
+
+| File | Description | Source |
+|------|-------------|--------|
+| `config/spec.yaml` | All deployment configuration | Fill in template |
+| RHEL 9.6 ISO | Installation media | Red Hat Customer Portal |
+| Syslog CA bundle | CA certificate for syslog server | Your PKI |
+
+### spec.yaml Configuration Sections
+
+```yaml
+# vCenter/ESXi connection
+vcenter:
+  server: "vcenter.example.local"
+  datacenter: "Datacenter"
+  cluster: "Cluster01"
+  datastore: "datastore1"
+
+# ISO paths
+isos:
+  rhel96_iso_path: "/path/to/rhel-9.6-x86_64-dvd.iso"
+
+# VM names
+vm_names:
+  rpm_external: "rpm-external"
+  rpm_internal: "rpm-internal"
+
+# Credentials (change after deployment!)
+credentials:
+  initial_root_password: "ChangeMe123!"
+  initial_admin_user: "admin"
+  initial_admin_password: "ChangeMe123!"
+
+# Syslog TLS (server-auth only)
+syslog_tls:
+  target_host: "syslog.example.local"
+  target_port: 6514
+  ca_bundle_local_path: "/path/to/syslog-ca.crt"
+
+# Hosts to onboard
+ansible:
+  ssh_username: "admin"
+  ssh_password: "ChangeMe123!"
+  host_inventory:
+    rhel9_hosts:
+      - hostname_or_ip: "192.168.1.50"
+        airgap_host_id: "app-server-01"
+    rhel8_hosts:
+      - hostname_or_ip: "192.168.1.60"
+        airgap_host_id: "legacy-app-01"
+```
+
+---
+
+## 2. Prerequisites
+
+### Operator Workstation
+
+| Requirement | Version | Installation |
+|-------------|---------|--------------|
+| PowerShell | 7.0+ | `winget install Microsoft.PowerShell` |
+| VMware PowerCLI | 13.0+ | `Install-Module VMware.PowerCLI` |
+| powershell-yaml | Latest | `Install-Module powershell-yaml` |
+| Python 3 | 3.8+ | System package or pyenv |
+| PyYAML | Latest | `pip3 install pyyaml` |
+| Ansible | 2.14+ | `pip3 install ansible` |
+| genisoimage (Linux) | Latest | `dnf install genisoimage` |
+| oscdimg (Windows) | ADK | Windows ADK installation |
+
+### VMware Environment
+
+- vCenter Server or ESXi 7.0+
+- Datastore with 500GB+ free space
+- Port group with DHCP enabled
+- RHEL 9.6 ISO uploaded to datastore (or local path for upload)
+
+### Credentials
+
+- vCenter/ESXi credentials (or set `VMWARE_USER`, `VMWARE_PASSWORD` env vars)
+- Red Hat subscription credentials (for external server registration)
+
+---
+
+## 3. Happy Path Deployment
+
+### Step 1: Fill spec.yaml
+
+```bash
+# Copy and edit configuration
+cp config/spec.yaml.example config/spec.yaml
+vim config/spec.yaml
+```
+
+Fill in all required fields for your environment.
+
+### Step 2: Validate Configuration
+
+```bash
+make validate-spec
+```
+
+**Expected Output:**
+```
+==========================================
+  Validating spec.yaml
+==========================================
+
+--- vCenter Configuration ---
+  [OK] .vcenter.server
+  [OK] .vcenter.datastore
+  ...
+
+==========================================
+  Validation Summary
+==========================================
+
+Validation PASSED
+```
+
+### Step 3: Generate Ansible Inventory
+
+```bash
+make render-inventory
+```
+
+**Expected Output:**
+```
+Generating Ansible inventory from spec.yaml...
+Inventory written to: ansible/inventories/generated.yml
+```
+
+### Step 4: Generate Kickstart ISOs
+
+```bash
+make generate-ks-iso
+```
+
+**Expected Output:**
+```
+Loading configuration...
+Processing external VM...
+  Generating kickstart file...
+  Created: output/ks-isos/staging/external/ks.cfg
+  Creating ISO for external...
+  Created: output/ks-isos/ks-external.iso
+
+Processing internal VM...
+  ...
+  Created: output/ks-isos/ks-internal.iso
+
+============================================================
+Kickstart ISOs generated successfully!
+```
+
+### Step 5: Upload ISOs to VMware Datastore
+
+```bash
+make upload-isos
+```
+
+**Expected Output:**
+```
+Uploading ISOs to VMware datastore...
+  Uploading ks-external.iso...
+  [OK] Uploaded ks-external.iso
+  Uploading ks-internal.iso...
+  [OK] Uploaded ks-internal.iso
+```
+
+### Step 6: Deploy VMs
+
+```bash
+make servers-deploy
+```
+
+**Expected Output:**
+```
+===============================================================================
+  AIRGAPPED RPM REPOSITORY - AUTOMATED SERVER DEPLOYMENT
+===============================================================================
+
+  Configuration Summary:
+  ----------------------
+  vCenter Server:   vcenter.example.local
+  External VM:      rpm-external
+  Internal VM:      rpm-internal
+
+Proceed with deployment? (yes/no): yes
+
+=== Step 1: Generating Kickstart ISOs ===
+...
+
+=== Step 5: Creating Virtual Machines ===
+  Creating rpm-external...
+    Mounting RHEL ISO...
+    Mounting Kickstart ISO...
+  [OK] Created rpm-external
+
+  Creating rpm-internal...
+  [OK] Created rpm-internal
+
+=== Step 6: Starting VMs ===
+  [OK] Started rpm-external
+  [OK] Started rpm-internal
+
+===============================================================================
+  DEPLOYMENT COMPLETE
+===============================================================================
+```
+
+### Step 7: Wait for Installation
+
+```bash
+make servers-wait
+```
+
+**Expected Output:**
+```
+Monitoring VMs: rpm-external, rpm-internal
+Timeout: 30 minutes
+
+[rpm-external] Installing... (Tools: guestToolsNotRunning)
+[rpm-internal] Installing... (Tools: guestToolsNotRunning)
+
+Elapsed: 05:30 | Remaining: 24:30
+Next check in 30 seconds...
+
+[rpm-external] VMware Tools running
+[rpm-external] Installation complete! IP: 192.168.1.100
+
+[rpm-internal] VMware Tools running
+[rpm-internal] Installation complete! IP: 192.168.1.101
+
+===============================================================================
+  ALL INSTALLATIONS COMPLETE
+===============================================================================
+```
+
+### Step 8: Report DHCP IPs
+
+```bash
+make servers-report
+```
+
+**Expected Output:**
+```
+===============================================================================
+  RPM SERVER IP ADDRESSES
+===============================================================================
+
+  rpm-external
+    Type:       external
+    Power:      PoweredOn
+    IP Address: 192.168.1.100
+
+  rpm-internal
+    Type:       internal
+    Power:      PoweredOn
+    IP Address: 192.168.1.101
+
+===============================================================================
+  SSH Access Commands
+===============================================================================
+
+  ssh admin@192.168.1.100  # rpm-external
+  ssh admin@192.168.1.101  # rpm-internal
+```
+
+### Step 9: Update Inventory with IPs
+
+Edit `ansible/inventories/generated.yml` to replace placeholder IPs:
+
+```yaml
+external_servers:
+  hosts:
+    rpm-external:
+      ansible_host: 192.168.1.100  # Update this
+
+internal_servers:
+  hosts:
+    rpm-internal:
+      ansible_host: 192.168.1.101  # Update this
+```
+
+### Step 10: Verify Internal Server Bootstrap
+
+```bash
+ssh admin@192.168.1.101
+
+# On internal server:
+systemctl --user status rpm-publisher
+# Expected: Active (if container is built and running)
+
+ls -la /srv/airgap/
+# Expected: data/ certs/ ansible/ directories
+
+cat /etc/airgap-role
+# Expected: internal-rpm-server
+```
+
+### Step 11: Configure Syslog TLS (if configured in spec.yaml)
+
+```bash
+make compliance
+```
+
+This runs STIG hardening including syslog TLS forwarding to the target specified in spec.yaml.
+
+**Expected Output:**
+```
+PLAY [STIG Hardening for Internal VM] ******************************************
+
+TASK [stig_rsyslog_tls_forward : Deploy rsyslog TLS forwarding configuration] *
+changed: [rpm-internal]
+
+TASK [stig_rsyslog_tls_forward : Test syslog TLS connectivity] *****************
+ok: [rpm-internal]
+```
+
+### Step 12: Onboard Managed Hosts
+
+```bash
+make ansible-onboard
+```
+
+You will be prompted for the SSH password (from spec.yaml).
+
+**Expected Output:**
+```
+Onboarding managed hosts...
+Step 1: Bootstrapping SSH keys (password auth)...
+SSH password: ********
+
+PLAY [Bootstrap SSH keys to managed hosts] *************************************
+...
+ok: [192.168.1.50]
+ok: [192.168.1.60]
+
+Step 2: Configuring repository access...
+
+PLAY [Host Onboarding - Airgapped RPM Infrastructure] **************************
+...
+TASK [host_onboarding : Deploy internal repository configuration] **************
+changed: [192.168.1.50]
+changed: [192.168.1.60]
+
+Onboarding complete!
+```
+
+### Step 13: Collect Manifests
+
+```bash
+make manifests
+```
+
+**Expected Output:**
+```
+Collecting package manifests...
+
+PLAY [Collect package manifests from hosts] ************************************
+...
+
+Manifests saved to: ansible/artifacts/manifests/
+Copy this directory to removable media for hand-carry to external server.
+```
+
+---
+
+## 4. External RPM Server Operations
+
+These operations are performed **on the external RPM server** (internet-connected).
+
+### Register with Red Hat
+
+```bash
+ssh admin@<external-ip>
+cd /path/to/airgapped-rpm-repo
+make sm-register
+```
+
+Enter Red Hat credentials when prompted.
+
+### Enable Repositories
+
+```bash
+make enable-repos
+```
+
+### Sync Packages
+
+```bash
+make sync
+```
+
+This may take several hours on first run.
+
+### Build Repository Metadata
+
+```bash
+make build-repos
+```
+
+### Create Export Bundle
+
+```bash
+make export BUNDLE_NAME=patch-$(date +%Y%m)
+```
+
+**Expected Output:**
+```
+Creating export bundle: patch-202501
+...
+Bundle created: /data/export/patch-202501.tar.gz
+Checksum:       /data/export/patch-202501.tar.gz.sha256
+Signature:      /data/export/patch-202501.tar.gz.sig
+BOM:            /data/export/patch-202501.bom.json
+```
+
+### Transfer Bundle to Internal Server
+
+Copy bundle files to removable media:
+```bash
+cp /data/export/patch-202501.* /mnt/usb/
+```
+
+Physically transfer media across airgap.
+
+---
+
+## 5. Internal RPM Server Operations
+
+These operations are performed **on the internal RPM server** (airgapped).
+
+### Import Bundle
+
+```bash
+ssh admin@<internal-ip>
+cd /path/to/airgapped-rpm-repo
+
+# Copy from removable media
+cp /mnt/usb/patch-202501.* /srv/airgap/data/import/
+
+# Import
+make import BUNDLE_PATH=/srv/airgap/data/import/patch-202501.tar.gz
+```
+
+**Expected Output:**
+```
+Importing bundle: /srv/airgap/data/import/patch-202501.tar.gz
+Verifying checksum... OK
+Verifying GPG signature... OK
+Extracting to testing environment...
+Building repository metadata...
+Import complete!
+```
+
+### Verify Import
+
+```bash
+make verify
+```
+
+### Test from Managed Host
+
+```bash
+# From a managed host configured for testing lifecycle
+ssh admin@<managed-host>
+sudo dnf clean all
+sudo dnf check-update
+```
+
+### Promote to Stable
+
+```bash
+make promote FROM=testing TO=stable
+```
+
+**Expected Output:**
+```
+Promoting from testing to stable...
+Syncing rhel8 packages...
+Syncing rhel9 packages...
+Rebuilding metadata...
+Promotion complete!
+```
+
+---
+
+## 6. Host Onboarding
+
+### Onboard New Hosts
+
+1. Add hosts to `config/spec.yaml`:
+   ```yaml
+   ansible:
+     host_inventory:
+       rhel9_hosts:
+         - hostname_or_ip: "192.168.1.70"
+           airgap_host_id: "new-server-01"
+   ```
+
+2. Regenerate inventory:
+   ```bash
+   make render-inventory
+   ```
+
+3. Run onboarding:
+   ```bash
+   make ansible-onboard
+   ```
+
+### Verify Host Configuration
+
+```bash
+# On managed host
+sudo dnf repolist
+# Expected: Only airgap-* repositories
+
+cat /etc/airgap/host-identity
+# Expected: new-server-01
+
+sudo dnf install -y tree
+# Expected: Installs from internal repository
+```
+
+---
+
+## 7. Monthly Patch Cycle
+
+### Complete Workflow
+
+1. **External Server**: Sync and export
+   ```bash
+   make sync
+   make build-repos
+   make export BUNDLE_NAME=patch-$(date +%Y%m)
+   ```
+
+2. **Physical Transfer**: Copy bundle to removable media
+
+3. **Internal Server**: Import and promote
+   ```bash
+   make import BUNDLE_PATH=/path/to/bundle.tar.gz
+   # Test on staging hosts
+   make promote FROM=testing TO=stable
+   ```
+
+4. **Managed Hosts**: Apply patches
+   ```bash
+   make patch
+   ```
+
+### Patch Verification
+
+```bash
+# Check all hosts are reachable after patching
+ansible -i ansible/inventories/generated.yml all -m ping
+
+# Check kernel versions
+ansible -i ansible/inventories/generated.yml managed_hosts -m shell -a "uname -r"
+
+# Collect updated manifests
+make manifests
+```
+
+---
+
+## 8. Certificate Management
+
+### Replace Self-Signed Certificate
+
+After obtaining a CA-signed certificate:
+
+```bash
+make replace-tls-cert \
+  CERT_PATH=/path/to/server.crt \
+  KEY_PATH=/path/to/server.key \
+  CA_CHAIN=/path/to/ca-chain.crt
+```
+
+**Expected Output:**
+```
+Replacing TLS certificate...
+
+TASK [Deploy new certificate] **************************************************
+changed: [rpm-internal]
+
+TASK [Restart rpm-publisher] ***************************************************
+changed: [rpm-internal]
+
+============================================================
+TLS CERTIFICATE REPLACED SUCCESSFULLY
+============================================================
+```
+
+### Distribute New CA to Hosts
+
+```bash
+cd ansible
+ansible-playbook -i inventories/generated.yml playbooks/onboard_hosts.yml --tags repository
+```
+
+---
+
+## 9. Troubleshooting
+
+### VM Deployment Issues
+
+**Problem**: PowerCLI cannot connect to vCenter
+```
+[FAIL] Connection failed: Could not connect to vCenter
+```
+
+**Solution**:
+```bash
+# Verify credentials
+export VMWARE_USER="administrator@vsphere.local"
+export VMWARE_PASSWORD="your-password"
+
+# Test connection
+pwsh -Command "Connect-VIServer -Server vcenter.example.local"
+```
+
+**Problem**: VM creation fails with "datastore not found"
+
+**Solution**: Verify datastore name in spec.yaml matches exactly (case-sensitive).
+
+### Kickstart Issues
+
+**Problem**: Installation not starting automatically
+
+**Solution**:
+1. Verify kickstart ISO has `OEMDRV` volume label
+2. Check both CD drives are connected
+3. Verify RHEL ISO is mounted as primary CD
+
+```bash
+# Verify ISO label
+isoinfo -d -i output/ks-isos/ks-external.iso | grep "Volume id"
+# Expected: Volume id: OEMDRV
+```
+
+### Ansible Issues
+
+**Problem**: SSH connection refused
+
+**Solution**:
+```bash
+# Verify SSH is running on target
+ssh admin@<ip>
+
+# Check SSH password in spec.yaml matches
+# Use --ask-pass for initial connection
+ansible -i ansible/inventories/generated.yml all -m ping --ask-pass
+```
+
+**Problem**: Python interpreter not found (RHEL 8)
+
+**Solution**: Verify inventory has correct interpreter:
+```yaml
+rhel8_hosts:
+  vars:
+    ansible_python_interpreter: /usr/bin/python3.11
+```
+
+### Repository Issues
+
+**Problem**: Managed host cannot reach repository
+
+**Solution**:
+```bash
+# Test connectivity
+curl -k https://<internal-ip>:8443/
+
+# Verify firewall
+ssh admin@<internal-ip> sudo firewall-cmd --list-all
+# Should include ports 8080 and 8443
+
+# Check container is running
+ssh admin@<internal-ip> systemctl --user status rpm-publisher
+```
+
+---
+
+## 10. Remaining Manual Steps
+
+### Required Manual Actions
+
+| Action | Justification | Frequency |
+|--------|---------------|-----------|
+| Fill `config/spec.yaml` | Environment-specific configuration | Once |
+| Download RHEL ISO | Red Hat licensing requires manual download | Once |
+| Provide syslog CA cert | Organization PKI requirement | Once |
+| Physical bundle transfer | Security requirement (airgap) | Monthly |
+| Red Hat registration | Requires subscription credentials | Once |
+
+### Why These Cannot Be Automated
+
+1. **spec.yaml**: Contains environment-specific values that only the operator knows
+2. **RHEL ISO**: Legal requirement to download from Red Hat with valid subscription
+3. **Syslog CA**: Organization-specific PKI infrastructure
+4. **Physical transfer**: The airgap is a security feature, not a limitation
+5. **Red Hat registration**: Credentials should not be stored in configuration files
+
+### Automation Coverage Summary
+
+| Category | Automated | Manual |
+|----------|-----------|--------|
+| VM creation and configuration | 100% | 0% |
+| OS installation | 100% | 0% |
+| SSH and user setup | 100% | 0% |
+| Repository server configuration | 100% | 0% |
+| TLS certificate bootstrap | 100% | 0% |
+| Host onboarding | 100% | 0% |
+| Patching workflow | 100% | 0% |
+
+All deployment steps that can be automated have been automated. The remaining manual steps are either security requirements (airgap) or licensing requirements (Red Hat).
+
+---
+
+## Quick Reference
+
+### Make Targets
+
+```bash
+# Configuration
+make validate-spec         # Validate spec.yaml
+make render-inventory      # Generate Ansible inventory
+
+# VMware
+make servers-deploy        # Deploy VMs
+make servers-destroy       # Destroy VMs
+make servers-report        # Report VM IPs
+make servers-wait          # Wait for installation
+
+# Ansible
+make ansible-onboard       # Full onboarding
+make ansible-bootstrap     # SSH keys only
+make manifests             # Collect manifests
+make patch                 # Monthly patching
+make compliance            # STIG hardening
+
+# External server
+make sm-register           # Red Hat registration
+make sync                  # Sync packages
+make export BUNDLE_NAME=x  # Create bundle
+
+# Internal server
+make import BUNDLE_PATH=x  # Import bundle
+make promote FROM=x TO=y   # Promote lifecycle
+```
+
+### Key Files
+
+```
+config/spec.yaml                        # All configuration
+ansible/inventories/generated.yml       # Generated inventory
+automation/powercli/deploy-rpm-servers.ps1  # VM deployment
+automation/kickstart/rhel96_*.ks        # OS installation
+ansible/playbooks/onboard_hosts.yml     # Host onboarding
+```
+
+### Environment Variables
+
+```bash
+export VMWARE_USER="administrator@vsphere.local"
+export VMWARE_PASSWORD="your-password"
+```

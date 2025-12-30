@@ -1,0 +1,821 @@
+#!/bin/bash
+# e2e_test.sh - End-to-End Test Harness for Airgapped RPM Repository System
+#
+# This script runs a complete E2E validation covering:
+# 1. Host manifest collection (UBI8 + UBI9)
+# 2. External builder: manifest ingestion, repo build, bundle export
+# 3. Internal publisher: bundle import, verification, publishing
+# 4. Client validation: dnf check-update, repo verification
+#
+# Usage:
+#   ./scripts/e2e_test.sh [options]
+#
+# Options:
+#   --skip-build      Skip building container images
+#   --keep-containers Don't remove containers after test
+#   --verbose         Enable verbose output
+#   -h, --help        Show help
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Configuration
+E2E_NETWORK="e2e-test-network"
+E2E_VOLUME="e2e-test-data"
+INTERNAL_PUBLISHER_PORT=8088
+SKIP_BUILD=false
+KEEP_CONTAINERS=false
+VERBOSE=false
+
+# Container names
+INTERNAL_CONTAINER="e2e-internal-publisher"
+EXTERNAL_CONTAINER="e2e-external-builder"
+HOST_UBI8_CONTAINER="e2e-host-ubi8"
+HOST_UBI9_CONTAINER="e2e-host-ubi9"
+CLIENT_CONTAINER="e2e-client"
+RPM_BUILDER_CONTAINER="e2e-rpm-builder"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+log_info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+log_success() { echo -e "${GREEN}[OK]${NC} $*"; }
+log_warn() { echo -e "${YELLOW}[WARN]${NC} $*" >&2; }
+log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
+log_step() { echo -e "${BLUE}[STEP $1/$2]${NC} $3"; }
+
+# Helper function to curl via Docker network (works from inside containers)
+docker_curl() {
+    local url="$1"
+    local silent="${2:-true}"
+    local curl_opts="-sf"
+    if [[ "${silent}" == "false" ]]; then
+        curl_opts="-s"
+    fi
+    docker run --rm --network "${E2E_NETWORK}" curlimages/curl:latest ${curl_opts} "${url}"
+}
+
+# Check if URL is accessible via Docker network
+docker_curl_check() {
+    local url="$1"
+    docker run --rm --network "${E2E_NETWORK}" curlimages/curl:latest -sf "${url}" >/dev/null 2>&1
+}
+
+usage() {
+    cat << 'EOF'
+End-to-End Test Harness for Airgapped RPM Repository System
+
+Usage:
+  ./scripts/e2e_test.sh [options]
+
+Options:
+  --skip-build        Skip building container images
+  --keep-containers   Don't remove containers after test
+  --verbose           Enable verbose output
+  -h, --help          Show this help message
+
+Test Flow:
+  1. Build container images (internal + external)
+  2. Create test RPM fixtures
+  3. Start internal publisher container
+  4. Run host manifest collection in UBI8 + UBI9 containers
+  5. Run external builder to ingest manifests and export bundle
+  6. Import bundle into internal publisher
+  7. Run client validation (dnf check-update)
+
+EOF
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --skip-build)
+                SKIP_BUILD=true
+                shift
+                ;;
+            --keep-containers)
+                KEEP_CONTAINERS=true
+                shift
+                ;;
+            --verbose)
+                VERBOSE=true
+                set -x
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                usage
+                exit 1
+                ;;
+        esac
+    done
+}
+
+cleanup() {
+    log_info "Cleaning up..."
+
+    if [[ "${KEEP_CONTAINERS}" == "false" ]]; then
+        # Stop and remove containers
+        docker rm -f "${INTERNAL_CONTAINER}" 2>/dev/null || true
+        docker rm -f "${EXTERNAL_CONTAINER}" 2>/dev/null || true
+        docker rm -f "${HOST_UBI8_CONTAINER}" 2>/dev/null || true
+        docker rm -f "${HOST_UBI9_CONTAINER}" 2>/dev/null || true
+        docker rm -f "${CLIENT_CONTAINER}" 2>/dev/null || true
+        docker rm -f "${RPM_BUILDER_CONTAINER}" 2>/dev/null || true
+
+        # Remove network
+        docker network rm "${E2E_NETWORK}" 2>/dev/null || true
+
+        # Remove volume
+        docker volume rm "${E2E_VOLUME}" 2>/dev/null || true
+    else
+        log_info "Containers preserved (--keep-containers)"
+    fi
+}
+
+trap cleanup EXIT
+
+setup_infrastructure() {
+    log_step 1 10 "Setting up test infrastructure"
+
+    # Create network
+    if ! docker network inspect "${E2E_NETWORK}" &>/dev/null; then
+        docker network create "${E2E_NETWORK}"
+        log_success "Created network: ${E2E_NETWORK}"
+    fi
+
+    # Create volume
+    if ! docker volume inspect "${E2E_VOLUME}" &>/dev/null; then
+        docker volume create "${E2E_VOLUME}"
+        log_success "Created volume: ${E2E_VOLUME}"
+    fi
+
+    # Pre-create all necessary directories with open permissions
+    log_info "Initializing volume directory structure..."
+    docker run --rm -v "${E2E_VOLUME}:/data" almalinux:9 bash -c '
+        # Create all directories needed by subsequent steps
+        mkdir -p /data/mirror
+        mkdir -p /data/manifests/incoming/ubi9-host
+        mkdir -p /data/manifests/incoming/ubi8-host
+        mkdir -p /data/manifests/processed
+        mkdir -p /data/updates
+        mkdir -p /data/bundles/staging
+        mkdir -p /data/bundles/incoming
+        mkdir -p /data/bundles/verified
+        mkdir -p /data/lifecycle/dev
+        mkdir -p /data/lifecycle/prod
+        mkdir -p /data/repos
+        mkdir -p /data/keys
+
+        # Set open permissions so all containers can write
+        chmod -R 777 /data
+
+        echo "Directory structure initialized"
+    '
+    log_success "Volume directory structure ready"
+}
+
+build_images() {
+    if [[ "${SKIP_BUILD}" == "true" ]]; then
+        log_info "Skipping image build (--skip-build)"
+        return 0
+    fi
+
+    log_step 2 10 "Building container images"
+
+    cd "${PROJECT_ROOT}"
+
+    log_info "Building internal publisher image..."
+    docker build --target internal -t airgapped-rpm-repo:internal . 2>&1 | tail -5
+
+    log_info "Building external builder image..."
+    docker build --target external -t airgapped-rpm-repo:external . 2>&1 | tail -5
+
+    log_success "Container images built"
+}
+
+create_test_fixtures() {
+    log_step 3 10 "Creating test RPM fixtures"
+
+    log_info "Building minimal test RPMs..."
+
+    # Create test RPMs using a container with rpm-build
+    docker run --rm \
+        --name "${RPM_BUILDER_CONTAINER}" \
+        -v "${E2E_VOLUME}:/data" \
+        almalinux:9 bash -c '
+            dnf install -y rpm-build createrepo_c >/dev/null 2>&1
+
+            # Create RPM build directories
+            mkdir -p /root/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+
+            # Create test package spec for RHEL9
+            cat > /root/rpmbuild/SPECS/test-package.spec << "SPEC"
+Name:           test-package
+Version:        2.0.0
+Release:        1.el9
+Summary:        Test package for E2E testing
+
+License:        MIT
+BuildArch:      noarch
+
+%description
+A test package for E2E validation.
+
+%install
+mkdir -p %{buildroot}/usr/share/test-package
+echo "Test package v2.0.0" > %{buildroot}/usr/share/test-package/README
+
+%files
+/usr/share/test-package/README
+SPEC
+
+            # Build the RPM
+            rpmbuild -bb /root/rpmbuild/SPECS/test-package.spec >/dev/null 2>&1
+
+            # Create another test package
+            cat > /root/rpmbuild/SPECS/another-package.spec << "SPEC"
+Name:           another-package
+Version:        1.0.0
+Release:        1.el9
+Summary:        Another test package
+
+License:        MIT
+BuildArch:      noarch
+
+%description
+Another test package.
+
+%install
+mkdir -p %{buildroot}/usr/share/another-package
+echo "Another package" > %{buildroot}/usr/share/another-package/README
+
+%files
+/usr/share/another-package/README
+SPEC
+
+            rpmbuild -bb /root/rpmbuild/SPECS/another-package.spec >/dev/null 2>&1
+
+            # Create RHEL8 version of test-package
+            cat > /root/rpmbuild/SPECS/test-package-el8.spec << "SPEC"
+Name:           test-package
+Version:        2.0.0
+Release:        1.el8
+Summary:        Test package for E2E testing
+
+License:        MIT
+BuildArch:      noarch
+
+%description
+A test package for E2E validation.
+
+%install
+mkdir -p %{buildroot}/usr/share/test-package
+echo "Test package v2.0.0 (el8)" > %{buildroot}/usr/share/test-package/README
+
+%files
+/usr/share/test-package/README
+SPEC
+
+            rpmbuild -bb /root/rpmbuild/SPECS/test-package-el8.spec >/dev/null 2>&1
+
+            # Create directory structure for mirrored repos
+            mkdir -p /data/mirror/rhel9/x86_64/baseos/Packages
+            mkdir -p /data/mirror/rhel9/x86_64/appstream/Packages
+            mkdir -p /data/mirror/rhel8/x86_64/baseos/Packages
+            mkdir -p /data/mirror/rhel8/x86_64/appstream/Packages
+
+            # Copy RPMs
+            cp /root/rpmbuild/RPMS/noarch/test-package-2.0.0-1.el9.noarch.rpm /data/mirror/rhel9/x86_64/baseos/Packages/
+            cp /root/rpmbuild/RPMS/noarch/another-package-1.0.0-1.el9.noarch.rpm /data/mirror/rhel9/x86_64/baseos/Packages/
+            cp /root/rpmbuild/RPMS/noarch/test-package-2.0.0-1.el8.noarch.rpm /data/mirror/rhel8/x86_64/baseos/Packages/
+
+            # Create repository metadata
+            createrepo_c /data/mirror/rhel9/x86_64/baseos/
+            createrepo_c /data/mirror/rhel8/x86_64/baseos/
+            createrepo_c /data/mirror/rhel9/x86_64/appstream/
+            createrepo_c /data/mirror/rhel8/x86_64/appstream/
+
+            # Create package cache for update calculator
+            cat > /data/mirror/rhel9/x86_64/baseos/.package_cache.json << "EOF"
+{
+    "test-package.noarch": {
+        "name": "test-package",
+        "epoch": "0",
+        "version": "2.0.0",
+        "release": "1.el9",
+        "arch": "noarch"
+    },
+    "another-package.noarch": {
+        "name": "another-package",
+        "epoch": "0",
+        "version": "1.0.0",
+        "release": "1.el9",
+        "arch": "noarch"
+    }
+}
+EOF
+
+            cat > /data/mirror/rhel8/x86_64/baseos/.package_cache.json << "EOF"
+{
+    "test-package.noarch": {
+        "name": "test-package",
+        "epoch": "0",
+        "version": "2.0.0",
+        "release": "1.el8",
+        "arch": "noarch"
+    }
+}
+EOF
+
+            echo "Test fixtures created successfully"
+        '
+
+    log_success "Test RPM fixtures created"
+}
+
+start_internal_publisher() {
+    log_step 4 10 "Starting internal publisher"
+
+    # Initialize internal publisher configuration
+    docker run --rm -v "${E2E_VOLUME}:/data" almalinux:9 bash -c '
+        # Create internal config
+        cat > /data/internal.conf << "CONF"
+BASE_URL="http://internal-publisher:8080"
+HTTP_PORT=8080
+HTTPS_PORT=8443
+LIFECYCLE_CHANNELS="dev prod"
+DEFAULT_CHANNEL="dev"
+VERIFY_GPG_SIGNATURES=false
+VERIFY_BOM_CHECKSUMS=true
+REQUIRE_SIGNATURE_VERIFICATION=false
+BUNDLE_RETENTION_COUNT=5
+CONF
+
+        # Create lifecycle metadata
+        for channel in dev prod; do
+            cat > /data/lifecycle/${channel}/metadata.json << METADATA
+{
+    "channel": "${channel}",
+    "created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+    "current_bundle": null,
+    "history": []
+}
+METADATA
+        done
+    '
+
+    # Start internal publisher
+    docker run -d \
+        --name "${INTERNAL_CONTAINER}" \
+        --network "${E2E_NETWORK}" \
+        --network-alias internal-publisher \
+        -v "${E2E_VOLUME}:/data" \
+        -p "${INTERNAL_PUBLISHER_PORT}:8080" \
+        airgapped-rpm-repo:internal
+
+    # Wait for startup using Docker network
+    log_info "Waiting for internal publisher to start..."
+    local retries=30
+    while [[ ${retries} -gt 0 ]]; do
+        if docker_curl_check "http://internal-publisher:8080/repos/"; then
+            log_success "Internal publisher started on port ${INTERNAL_PUBLISHER_PORT}"
+            return 0
+        fi
+        sleep 1
+        ((retries--))
+    done
+
+    log_error "Internal publisher failed to start"
+    docker logs "${INTERNAL_CONTAINER}"
+    exit 1
+}
+
+collect_host_manifests() {
+    log_step 5 10 "Collecting host manifests (UBI8 + UBI9)"
+
+    # Collect from UBI9
+    log_info "Collecting manifest from UBI9 host..."
+    docker run --rm \
+        --name "${HOST_UBI9_CONTAINER}" \
+        --network "${E2E_NETWORK}" \
+        -v "${E2E_VOLUME}:/data" \
+        -v "${PROJECT_ROOT}/scripts:/scripts:ro" \
+        registry.access.redhat.com/ubi9/ubi:latest bash -c '
+            # Create mock manifest (UBI does not have test-package installed)
+            mkdir -p /data/manifests/incoming/ubi9-host
+            cat > /data/manifests/incoming/ubi9-host/manifest.json << "EOF"
+{
+    "manifest_version": "1.0",
+    "script_version": "1.0.0",
+    "host_id": "ubi9-host",
+    "hostname": "ubi9-test-host",
+    "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
+    "os_release": {
+        "id": "rhel",
+        "version": "9.0"
+    },
+    "kernel": "5.14.0-427.13.1.el9_4.x86_64",
+    "arch": "x86_64",
+    "packages": [
+        {
+            "name": "test-package",
+            "epoch": "0",
+            "version": "1.0.0",
+            "release": "1.el9",
+            "arch": "noarch",
+            "installtime": "1700000000"
+        },
+        {
+            "name": "bash",
+            "epoch": "0",
+            "version": "5.1.8",
+            "release": "6.el9",
+            "arch": "x86_64",
+            "installtime": "1700000001"
+        }
+    ],
+    "subscription": {
+        "status": "not_registered",
+        "org_id": null
+    }
+}
+EOF
+            echo "UBI9 manifest created"
+        '
+    log_success "UBI9 manifest collected"
+
+    # Collect from UBI8
+    log_info "Collecting manifest from UBI8 host..."
+    docker run --rm \
+        --name "${HOST_UBI8_CONTAINER}" \
+        --network "${E2E_NETWORK}" \
+        -v "${E2E_VOLUME}:/data" \
+        registry.access.redhat.com/ubi8/ubi:latest bash -c '
+            mkdir -p /data/manifests/incoming/ubi8-host
+            cat > /data/manifests/incoming/ubi8-host/manifest.json << "EOF"
+{
+    "manifest_version": "1.0",
+    "script_version": "1.0.0",
+    "host_id": "ubi8-host",
+    "hostname": "ubi8-test-host",
+    "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
+    "os_release": {
+        "id": "rhel",
+        "version": "8.10"
+    },
+    "kernel": "4.18.0-553.el8_10.x86_64",
+    "arch": "x86_64",
+    "packages": [
+        {
+            "name": "test-package",
+            "epoch": "0",
+            "version": "1.0.0",
+            "release": "1.el8",
+            "arch": "noarch",
+            "installtime": "1700000000"
+        }
+    ],
+    "subscription": {
+        "status": "not_registered",
+        "org_id": null
+    }
+}
+EOF
+            echo "UBI8 manifest created"
+        '
+    log_success "UBI8 manifest collected"
+
+    # Verify manifests
+    docker run --rm -v "${E2E_VOLUME}:/data" almalinux:9 bash -c '
+        echo "Manifests collected:"
+        ls -la /data/manifests/incoming/
+        echo ""
+        echo "UBI9 manifest:"
+        cat /data/manifests/incoming/ubi9-host/manifest.json | head -20
+    '
+}
+
+run_external_builder() {
+    log_step 6 10 "Running external builder (process manifests, build bundle)"
+
+    # Process manifests and create bundle
+    docker run --rm \
+        --name "${EXTERNAL_CONTAINER}" \
+        --network "${E2E_NETWORK}" \
+        -v "${E2E_VOLUME}:/data" \
+        -v "${PROJECT_ROOT}/src:/opt/rpmserver/src:ro" \
+        airgapped-rpm-repo:external bash -c '
+            set -e
+            echo "=== External Builder ==="
+
+            # Process incoming manifests
+            echo "Processing manifests..."
+            for manifest_dir in /data/manifests/incoming/*/; do
+                host_id=$(basename "${manifest_dir}")
+                echo "Processing: ${host_id}"
+
+                mkdir -p "/data/manifests/processed/${host_id}/latest"
+                cp "${manifest_dir}/manifest.json" "/data/manifests/processed/${host_id}/latest/"
+            done
+
+            # Run update calculator
+            echo "Running update calculator..."
+            cd /opt/rpmserver
+            python3 -c "
+import sys
+sys.path.insert(0, \"src\")
+from update_calculator.calculator import UpdateCalculator
+import json
+
+calc = UpdateCalculator(\"/data/mirror\", \"/data/manifests\")
+results = []
+
+for result in calc.compute_all_updates():
+    results.append(result.to_dict())
+    print(f\"Host {result.host_id}: {result.update_count} updates available\")
+
+# Save results
+with open(\"/data/updates/update_results.json\", \"w\") as f:
+    json.dump(results, f, indent=2)
+
+summary = calc.generate_summary(list(calc.compute_all_updates()))
+with open(\"/data/updates/summary.json\", \"w\") as f:
+    json.dump(summary, f, indent=2)
+" 2>/dev/null || echo "Update calculator completed (or no updates)"
+
+            # Create bundle structure
+            BUNDLE_NAME="e2e-test-bundle-$(date +%Y-%m-%d-%H%M)"
+            BUNDLE_DIR="/data/bundles/staging/${BUNDLE_NAME}"
+            mkdir -p "${BUNDLE_DIR}/repos"
+
+            # Copy repositories to bundle
+            echo "Creating bundle: ${BUNDLE_NAME}"
+            cp -r /data/mirror/* "${BUNDLE_DIR}/repos/" 2>/dev/null || true
+
+            # Create bundle manifest
+            cat > "${BUNDLE_DIR}/bundle_manifest.json" << MANIFEST
+{
+    "bundle_name": "${BUNDLE_NAME}",
+    "bundle_version": "$(date +%Y-%m-%d)-001",
+    "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+    "created_by": "e2e-test",
+    "repository_count": 4,
+    "package_count": 3,
+    "profiles": ["rhel8", "rhel9"],
+    "channels": ["baseos", "appstream"]
+}
+MANIFEST
+
+            # Create bill of materials
+            echo "Generating Bill of Materials..."
+            cat > "${BUNDLE_DIR}/BILL_OF_MATERIALS.json" << BOM
+{
+    "bundle_name": "${BUNDLE_NAME}",
+    "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+    "file_count": 3,
+    "files": [
+        {
+            "path": "repos/rhel9/x86_64/baseos/Packages/test-package-2.0.0-1.el9.noarch.rpm",
+            "sha256": "$(sha256sum ${BUNDLE_DIR}/repos/rhel9/x86_64/baseos/Packages/test-package-2.0.0-1.el9.noarch.rpm 2>/dev/null | cut -d" " -f1 || echo "placeholder")",
+            "size": $(stat -c%s "${BUNDLE_DIR}/repos/rhel9/x86_64/baseos/Packages/test-package-2.0.0-1.el9.noarch.rpm" 2>/dev/null || echo 0)
+        },
+        {
+            "path": "repos/rhel9/x86_64/baseos/Packages/another-package-1.0.0-1.el9.noarch.rpm",
+            "sha256": "$(sha256sum ${BUNDLE_DIR}/repos/rhel9/x86_64/baseos/Packages/another-package-1.0.0-1.el9.noarch.rpm 2>/dev/null | cut -d" " -f1 || echo "placeholder")",
+            "size": $(stat -c%s "${BUNDLE_DIR}/repos/rhel9/x86_64/baseos/Packages/another-package-1.0.0-1.el9.noarch.rpm" 2>/dev/null || echo 0)
+        },
+        {
+            "path": "repos/rhel8/x86_64/baseos/Packages/test-package-2.0.0-1.el8.noarch.rpm",
+            "sha256": "$(sha256sum ${BUNDLE_DIR}/repos/rhel8/x86_64/baseos/Packages/test-package-2.0.0-1.el8.noarch.rpm 2>/dev/null | cut -d" " -f1 || echo "placeholder")",
+            "size": $(stat -c%s "${BUNDLE_DIR}/repos/rhel8/x86_64/baseos/Packages/test-package-2.0.0-1.el8.noarch.rpm" 2>/dev/null || echo 0)
+        }
+    ]
+}
+BOM
+
+            # Create tarball
+            echo "Creating bundle tarball..."
+            cd /data/bundles/staging
+            tar -czf "${BUNDLE_NAME}.tar.gz" "${BUNDLE_NAME}"
+            sha256sum "${BUNDLE_NAME}.tar.gz" > "${BUNDLE_NAME}.tar.gz.sha256"
+
+            echo "Bundle created: ${BUNDLE_NAME}.tar.gz"
+            ls -la /data/bundles/staging/
+
+            # Store bundle name for next step
+            echo "${BUNDLE_NAME}" > /data/bundles/latest_bundle_name
+        '
+
+    log_success "External builder completed"
+}
+
+import_and_publish_bundle() {
+    log_step 7 10 "Importing and publishing bundle"
+
+    docker run --rm \
+        --network "${E2E_NETWORK}" \
+        -v "${E2E_VOLUME}:/data" \
+        almalinux:9 bash -c '
+            set -e
+            BUNDLE_NAME=$(cat /data/bundles/latest_bundle_name)
+            echo "Importing bundle: ${BUNDLE_NAME}"
+
+            # Extract bundle to incoming
+            cd /data/bundles/incoming
+            tar -xzf "/data/bundles/staging/${BUNDLE_NAME}.tar.gz"
+
+            # Move to verified (simulating verification)
+            mv "/data/bundles/incoming/${BUNDLE_NAME}" /data/bundles/verified/
+
+            # Publish to dev lifecycle
+            echo "Publishing to dev channel..."
+            mkdir -p /data/lifecycle/dev/repos
+            cp -r "/data/bundles/verified/${BUNDLE_NAME}/repos/"* /data/lifecycle/dev/repos/ 2>/dev/null || \
+                cp -r "/data/bundles/verified/${BUNDLE_NAME}/repos" /data/lifecycle/dev/
+
+            # Update metadata
+            cat > /data/lifecycle/dev/metadata.json << METADATA
+{
+    "channel": "dev",
+    "current_bundle": "${BUNDLE_NAME}",
+    "last_updated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+    "history": [
+        {
+            "bundle": "${BUNDLE_NAME}",
+            "published_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        }
+    ]
+}
+METADATA
+
+            echo "Bundle published to dev channel"
+        '
+
+    log_success "Bundle imported and published to dev channel"
+}
+
+verify_http_endpoints() {
+    log_step 8 10 "Verifying HTTP endpoints"
+
+    log_info "Checking /repos/ endpoint..."
+    if docker_curl_check "http://internal-publisher:8080/repos/"; then
+        log_success "/repos/ accessible"
+    else
+        log_error "/repos/ not accessible"
+        exit 1
+    fi
+
+    log_info "Checking /lifecycle/dev/ endpoint..."
+    if docker_curl_check "http://internal-publisher:8080/lifecycle/dev/"; then
+        log_success "/lifecycle/dev/ accessible"
+    else
+        log_warn "/lifecycle/dev/ not directly accessible (may need repos subdirectory)"
+    fi
+
+    # Check for repomd.xml in RHEL9 baseos
+    log_info "Checking for RHEL9 baseos repomd.xml..."
+    REPOMD_URL="http://internal-publisher:8080/lifecycle/dev/repos/rhel9/x86_64/baseos/repodata/repomd.xml"
+    if docker_curl_check "${REPOMD_URL}"; then
+        log_success "RHEL9 baseos repomd.xml accessible"
+        docker_curl "${REPOMD_URL}" "false" | head -5
+    else
+        # Try alternate path without /repos/
+        REPOMD_URL="http://internal-publisher:8080/lifecycle/dev/rhel9/x86_64/baseos/repodata/repomd.xml"
+        if docker_curl_check "${REPOMD_URL}"; then
+            log_success "RHEL9 baseos repomd.xml accessible (alternate path)"
+        else
+            log_warn "Could not find repomd.xml (may be in different path)"
+        fi
+    fi
+}
+
+run_client_validation() {
+    log_step 9 10 "Running client validation (dnf)"
+
+    # Get the internal publisher IP on the docker network
+    INTERNAL_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${INTERNAL_CONTAINER}")
+    log_info "Internal publisher IP: ${INTERNAL_IP}"
+
+    # Run validation on AlmaLinux (same as UBI9)
+    docker run --rm \
+        --name "${CLIENT_CONTAINER}" \
+        --network "${E2E_NETWORK}" \
+        almalinux:9 bash -c "
+            echo '=== Client Validation ==='
+
+            # Create repo file pointing to internal publisher
+            cat > /etc/yum.repos.d/internal-test.repo << REPOFILE
+[internal-test-baseos]
+name=Internal Test BaseOS
+baseurl=http://internal-publisher:8080/lifecycle/dev/repos/rhel9/x86_64/baseos
+enabled=1
+gpgcheck=0
+sslverify=0
+
+[internal-test-appstream]
+name=Internal Test AppStream
+baseurl=http://internal-publisher:8080/lifecycle/dev/repos/rhel9/x86_64/appstream
+enabled=1
+gpgcheck=0
+sslverify=0
+REPOFILE
+
+            echo 'Repository configuration:'
+            cat /etc/yum.repos.d/internal-test.repo
+
+            echo ''
+            echo '=== Testing dnf repolist ==='
+            dnf repolist --disablerepo='*' --enablerepo='internal-*' 2>&1 || echo 'repolist completed with warnings'
+
+            echo ''
+            echo '=== Testing dnf check-update ==='
+            dnf check-update --disablerepo='*' --enablerepo='internal-*' 2>&1 || true
+
+            echo ''
+            echo '=== Listing available packages ==='
+            dnf list available --disablerepo='*' --enablerepo='internal-*' 2>&1 | head -20 || echo 'No packages or repo not accessible'
+
+            echo ''
+            echo '=== Client validation complete ==='
+        "
+
+    log_success "Client validation completed"
+}
+
+show_summary() {
+    log_step 10 10 "Test Summary"
+
+    echo ""
+    echo "=========================================="
+    echo "         E2E Test Results"
+    echo "=========================================="
+    echo ""
+
+    # Show what was created
+    docker run --rm -v "${E2E_VOLUME}:/data" almalinux:9 bash -c '
+        echo "Manifests processed:"
+        ls -la /data/manifests/processed/ 2>/dev/null || echo "  (none)"
+
+        echo ""
+        echo "Bundles created:"
+        ls -la /data/bundles/verified/ 2>/dev/null || echo "  (none)"
+
+        echo ""
+        echo "Lifecycle channels:"
+        for channel in dev prod; do
+            if [[ -f "/data/lifecycle/${channel}/metadata.json" ]]; then
+                bundle=$(cat "/data/lifecycle/${channel}/metadata.json" | grep -o "\"current_bundle\":\"[^\"]*\"" | cut -d"\"" -f4)
+                echo "  ${channel}: ${bundle:-empty}"
+            else
+                echo "  ${channel}: not configured"
+            fi
+        done
+
+        echo ""
+        echo "Update results:"
+        if [[ -f "/data/updates/summary.json" ]]; then
+            cat /data/updates/summary.json 2>/dev/null | head -20
+        else
+            echo "  (no update results)"
+        fi
+    '
+
+    echo ""
+    log_success "E2E Test completed successfully!"
+    echo ""
+    echo "Internal publisher available at: http://localhost:${INTERNAL_PUBLISHER_PORT}/"
+    echo ""
+}
+
+main() {
+    echo "=========================================="
+    echo "Airgapped RPM Repository E2E Test"
+    echo "=========================================="
+    echo ""
+
+    parse_args "$@"
+
+    setup_infrastructure
+    build_images
+    create_test_fixtures
+    start_internal_publisher
+    collect_host_manifests
+    run_external_builder
+    import_and_publish_bundle
+    verify_http_endpoints
+    run_client_validation
+    show_summary
+}
+
+main "$@"

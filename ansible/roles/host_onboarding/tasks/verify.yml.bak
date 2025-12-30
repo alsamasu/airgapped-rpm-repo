@@ -1,0 +1,118 @@
+---
+# ansible/roles/host_onboarding/tasks/verify.yml
+# Verify onboarding configuration
+
+- name: Initialize verification results
+  ansible.builtin.set_fact:
+    verify_results: []
+
+- name: Verify host identity file exists
+  ansible.builtin.stat:
+    path: "{{ host_identity_file }}"
+  register: identity_check
+
+- name: Record identity verification
+  ansible.builtin.set_fact:
+    verify_results: "{{ verify_results + [{'check': 'Host Identity', 'status': identity_check.stat.exists | ternary('PASS', 'FAIL')}] }}"
+
+- name: Verify internal.repo exists
+  ansible.builtin.stat:
+    path: /etc/yum.repos.d/internal.repo
+  register: repo_file_check
+
+- name: Record repo file verification
+  ansible.builtin.set_fact:
+    verify_results: "{{ verify_results + [{'check': 'Repo Config File', 'status': repo_file_check.stat.exists | ternary('PASS', 'FAIL')}] }}"
+
+- name: Verify repository connectivity
+  ansible.builtin.uri:
+    url: "{{ internal_repo_url }}/"
+    method: GET
+    validate_certs: false
+    timeout: 10
+  register: repo_http_check
+  failed_when: false
+
+- name: Record HTTP verification
+  ansible.builtin.set_fact:
+    verify_results: "{{ verify_results + [{'check': 'Repo HTTP Access', 'status': (repo_http_check.status | default(0) == 200) | ternary('PASS', 'FAIL')}] }}"
+
+- name: Verify GPG key is imported
+  ansible.builtin.shell: |
+    rpm -q gpg-pubkey --qf '%{SUMMARY}\n' | grep -qi internal
+  register: gpg_check
+  changed_when: false
+  failed_when: false
+
+- name: Record GPG verification
+  ansible.builtin.set_fact:
+    verify_results: "{{ verify_results + [{'check': 'GPG Key Imported', 'status': (gpg_check.rc == 0) | ternary('PASS', 'WARN')}] }}"
+
+- name: Verify DNF can list repos
+  ansible.builtin.command: dnf repolist
+  register: dnf_check
+  changed_when: false
+  failed_when: false
+
+- name: Record DNF verification
+  ansible.builtin.set_fact:
+    verify_results: "{{ verify_results + [{'check': 'DNF Repolist', 'status': (dnf_check.rc == 0) | ternary('PASS', 'FAIL')}] }}"
+
+- name: Verify rsyslog TLS config exists
+  ansible.builtin.stat:
+    path: /etc/rsyslog.d/60-tls-forward.conf
+  register: syslog_config_check
+  when: onboard_configure_syslog | bool
+
+- name: Record syslog config verification
+  ansible.builtin.set_fact:
+    verify_results: "{{ verify_results + [{'check': 'Syslog TLS Config', 'status': syslog_config_check.stat.exists | ternary('PASS', 'FAIL')}] }}"
+  when: onboard_configure_syslog | bool
+
+- name: Verify rsyslog is running
+  ansible.builtin.systemd:
+    name: rsyslog
+  register: rsyslog_status
+  when: onboard_configure_syslog | bool
+
+- name: Record rsyslog status verification
+  ansible.builtin.set_fact:
+    verify_results: "{{ verify_results + [{'check': 'Rsyslog Running', 'status': (rsyslog_status.status.ActiveState == 'active') | ternary('PASS', 'FAIL')}] }}"
+  when: onboard_configure_syslog | bool
+
+- name: Test package search (verification)
+  ansible.builtin.command: dnf search bash
+  register: pkg_search
+  changed_when: false
+  failed_when: false
+  when: onboard_verify_packages | bool
+
+- name: Record package search verification
+  ansible.builtin.set_fact:
+    verify_results: "{{ verify_results + [{'check': 'Package Search', 'status': (pkg_search.rc == 0) | ternary('PASS', 'WARN')}] }}"
+  when: onboard_verify_packages | bool
+
+- name: Display verification results
+  ansible.builtin.debug:
+    msg: |
+      ============================================================
+      ONBOARDING VERIFICATION RESULTS
+      ============================================================
+      {% for result in verify_results %}
+      {{ '%-20s' | format(result.check) }} : {{ result.status }}
+      {% endfor %}
+      ============================================================
+      
+      {% set failed = verify_results | selectattr('status', 'equalto', 'FAIL') | list %}
+      {% if failed | length > 0 %}
+      WARNING: {{ failed | length }} check(s) failed. Review configuration.
+      {% else %}
+      All critical checks passed.
+      {% endif %}
+
+- name: Fail if critical checks failed
+  ansible.builtin.fail:
+    msg: "Onboarding verification failed. Check results above."
+  when:
+    - verify_results | selectattr('status', 'equalto', 'FAIL') | list | length > 0
+    - onboard_fail_on_verify_error | default(false) | bool

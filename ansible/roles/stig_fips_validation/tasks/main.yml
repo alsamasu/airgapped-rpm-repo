@@ -1,0 +1,86 @@
+---
+# ansible/roles/stig_fips_validation/tasks/main.yml
+# FIPS mode validation and configuration
+#
+# Validates FIPS 140-2/140-3 compliance status.
+
+- name: Check current FIPS mode status
+  ansible.builtin.slurp:
+    src: /proc/sys/crypto/fips_enabled
+  register: fips_status_raw
+  ignore_errors: true
+  
+- name: Parse FIPS status
+  ansible.builtin.set_fact:
+    fips_enabled: "{{ (fips_status_raw.content | default('MA==') | b64decode | trim) == '1' }}"
+    
+- name: Display FIPS status
+  ansible.builtin.debug:
+    msg: "FIPS mode is {{ 'ENABLED' if fips_enabled else 'DISABLED' }}"
+    
+- name: Check FIPS packages installed
+  ansible.builtin.dnf:
+    name:
+      - crypto-policies
+      - crypto-policies-scripts
+    state: present
+    
+- name: Get current crypto policy
+  ansible.builtin.command: update-crypto-policies --show
+  register: crypto_policy
+  changed_when: false
+  
+- name: Display current crypto policy
+  ansible.builtin.debug:
+    msg: "Current crypto policy: {{ crypto_policy.stdout }}"
+    
+- name: Collect FIPS compliance evidence
+  ansible.builtin.shell: |
+    mkdir -p /var/log/stig-evidence
+    
+    cat > /var/log/stig-evidence/fips-validation.txt << EOF
+    FIPS Validation Report
+    ======================
+    Generated: $(date -Iseconds)
+    Host: {{ inventory_hostname }}
+    Host ID: {{ airgap_host_id | default(ansible_machine_id | default('unknown')) }}
+    
+    FIPS Mode Status
+    ----------------
+    Kernel FIPS: {{ 'ENABLED' if fips_enabled else 'DISABLED' }}
+    Crypto Policy: {{ crypto_policy.stdout }}
+    
+    FIPS Packages
+    -------------
+    $(rpm -qa | grep -i fips || echo "No FIPS packages found")
+    
+    OpenSSL FIPS Provider
+    --------------------
+    $(openssl list -providers 2>/dev/null || echo "Unable to list providers")
+    
+    Crypto Algorithms
+    -----------------
+    $(openssl list -digest-algorithms 2>/dev/null | head -20 || echo "Unable to list algorithms")
+    EOF
+  changed_when: false
+  
+- name: FIPS compliance warning
+  ansible.builtin.debug:
+    msg: |
+      WARNING: FIPS mode is NOT enabled on this system.
+      
+      To enable FIPS mode (requires reboot):
+        1. fips-mode-setup --enable
+        2. reboot
+      
+      Note: FIPS mode should be enabled during OS installation
+      for full compliance.
+  when: not fips_enabled
+  
+- name: Validate FIPS-compliant crypto policy
+  ansible.builtin.assert:
+    that:
+      - "'FIPS' in crypto_policy.stdout or 'LEGACY' not in crypto_policy.stdout"
+    fail_msg: "Crypto policy '{{ crypto_policy.stdout }}' may not be FIPS compliant"
+    success_msg: "Crypto policy '{{ crypto_policy.stdout }}' appears FIPS compatible"
+  ignore_errors: true
