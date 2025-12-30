@@ -1,0 +1,27 @@
+---
+# ansible/playbooks/collect_manifests.yml
+# Collect package manifests from managed hosts
+#
+# Gathers installed package information from all managed hosts
+# and stores manifests for update calculation.
+#
+# Usage:
+#   ansible-playbook playbooks/collect_manifests.yml
+
+- name: Collect package manifests from managed hosts
+  hosts: managed_hosts
+  gather_facts: true
+  
+  vars:
+    manifest_dir: /runner/artifacts/manifests
+    
+  roles:
+    - role: manifest_collector
+      
+  tasks:
+    - name: Display manifest collection summary
+      ansible.builtin.debug:
+        msg: |
+          Manifest collected for host: {{ airgap_host_id | default(ansible_machine_id) }}
+          - OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          - Packages: {{ installed_packages | default([]) | length }}

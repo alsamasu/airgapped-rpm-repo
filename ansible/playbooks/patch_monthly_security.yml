@@ -1,0 +1,146 @@
+---
+# ansible/playbooks/patch_monthly_security.yml
+# Monthly security patching playbook
+#
+# Applies security updates to managed hosts with:
+# - Pre-patching health checks
+# - Security-only updates
+# - Controlled reboot orchestration
+# - Post-patching validation
+#
+# Usage:
+#   ansible-playbook playbooks/patch_monthly_security.yml
+#   ansible-playbook playbooks/patch_monthly_security.yml --limit rhel9_hosts
+#   ansible-playbook playbooks/patch_monthly_security.yml -e reboot_timeout=600
+
+- name: Monthly security patching
+  hosts: managed_hosts
+  gather_facts: true
+  serial: "{{ patch_serial | default('20%') }}"
+  max_fail_percentage: "{{ patch_max_fail | default(10) }}"
+  
+  vars:
+    # Patching settings
+    security_only: true
+    reboot_required: true
+    reboot_timeout: 300
+    
+    # Pre/post check commands
+    pre_patch_checks:
+      - "df -h / | awk 'NR==2 {if ($5+0 > 90) exit 1}'"  # Disk space check
+      - "systemctl is-system-running || true"  # System state
+      
+    post_patch_checks:
+      - "systemctl is-system-running --wait || systemctl is-system-running"
+      
+  tasks:
+    - name: Record patching start time
+      ansible.builtin.set_fact:
+        patch_start_time: "{{ ansible_date_time.iso8601 }}"
+        
+    # Pre-patching checks
+    - name: Run pre-patching health checks
+      ansible.builtin.shell: "{{ item }}"
+      loop: "{{ pre_patch_checks }}"
+      register: pre_checks
+      changed_when: false
+      
+    - name: Create patching log directory
+      ansible.builtin.file:
+        path: /var/log/patching
+        state: directory
+        mode: '0755'
+        
+    - name: Log pre-patch package state
+      ansible.builtin.shell: |
+        rpm -qa --queryformat '%{NAME}|%{EPOCH}|%{VERSION}|%{RELEASE}|%{ARCH}\n' > /var/log/patching/pre-patch-$(date +%Y%m%d).txt
+      changed_when: false
+      
+    # Apply security updates
+    - name: Check for available security updates
+      ansible.builtin.dnf:
+        security: true
+        state: latest
+        update_only: true
+        update_cache: true
+      check_mode: true
+      register: security_updates
+      
+    - name: Display available security updates
+      ansible.builtin.debug:
+        msg: "{{ security_updates.results | default([]) | length }} security updates available"
+        
+    - name: Apply security updates
+      ansible.builtin.dnf:
+        security: "{{ security_only }}"
+        state: latest
+        update_only: true
+      register: patch_result
+      when: security_updates.changed | default(false)
+      
+    - name: Log post-patch package state
+      ansible.builtin.shell: |
+        rpm -qa --queryformat '%{NAME}|%{EPOCH}|%{VERSION}|%{RELEASE}|%{ARCH}\n' > /var/log/patching/post-patch-$(date +%Y%m%d).txt
+      changed_when: false
+      
+    # Reboot handling
+    - name: Check if reboot is required
+      ansible.builtin.stat:
+        path: /var/run/reboot-required
+      register: reboot_required_file
+      
+    - name: Check for kernel updates
+      ansible.builtin.shell: |
+        CURRENT=$(uname -r)
+        LATEST=$(rpm -q --last kernel | head -1 | awk '{print $1}' | sed 's/kernel-//')
+        [ "$CURRENT" != "$LATEST" ] && echo "reboot_needed" || echo "current"
+      register: kernel_check
+      changed_when: false
+      
+    - name: Reboot if required
+      ansible.builtin.reboot:
+        reboot_timeout: "{{ reboot_timeout }}"
+        msg: "Monthly security patching reboot"
+        pre_reboot_delay: 10
+        post_reboot_delay: 30
+      when: 
+        - reboot_required | bool
+        - (reboot_required_file.stat.exists | default(false)) or (kernel_check.stdout == 'reboot_needed')
+        
+    # Post-patching validation
+    - name: Run post-patching health checks
+      ansible.builtin.shell: "{{ item }}"
+      loop: "{{ post_patch_checks }}"
+      register: post_checks
+      changed_when: false
+      
+    - name: Verify critical services are running
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        state: started
+      loop:
+        - sshd
+        - rsyslog
+      register: service_check
+      
+    - name: Generate patching report
+      ansible.builtin.copy:
+        content: |
+          Patching Report
+          ===============
+          Host: {{ inventory_hostname }}
+          Host ID: {{ airgap_host_id | default(ansible_machine_id) }}
+          Start Time: {{ patch_start_time }}
+          End Time: {{ ansible_date_time.iso8601 }}
+          Updates Applied: {{ patch_result.changed | default(false) }}
+          Reboot Performed: {{ ansible_reboot_pending | default(false) }}
+          Status: SUCCESS
+        dest: /var/log/patching/report-{{ ansible_date_time.date }}.txt
+        mode: '0644'
+        
+    - name: Display patching summary
+      ansible.builtin.debug:
+        msg: |
+          Patching complete for {{ inventory_hostname }}
+          - Updates applied: {{ patch_result.changed | default(false) }}
+          - Reboot: {{ ansible_reboot_pending | default('not required') }}

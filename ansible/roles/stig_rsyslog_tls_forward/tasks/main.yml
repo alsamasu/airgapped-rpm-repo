@@ -1,0 +1,87 @@
+---
+# ansible/roles/stig_rsyslog_tls_forward/tasks/main.yml
+# Configure rsyslog TLS forwarding (SERVER-AUTH ONLY)
+#
+# Forwards logs to central syslog over TLS with server certificate
+# verification. NO client certificates (no mTLS).
+#
+# Variables:
+#   syslog_tls_target_host: Target syslog server hostname/IP
+#   syslog_tls_target_port: Target port (default: 6514)
+#   syslog_tls_ca_bundle_path: Path to CA bundle for server verification
+
+- name: Ensure rsyslog-gnutls is installed
+  ansible.builtin.dnf:
+    name: rsyslog-gnutls
+    state: present
+    
+- name: Create PKI directory for syslog CA
+  ansible.builtin.file:
+    path: "{{ syslog_tls_ca_bundle_path | dirname }}"
+    state: directory
+    mode: '0755'
+    
+- name: Deploy syslog CA certificate
+  ansible.builtin.copy:
+    src: "{{ syslog_ca_cert_source | default('syslog-ca.crt') }}"
+    dest: "{{ syslog_tls_ca_bundle_path }}"
+    mode: '0644'
+  when: syslog_ca_cert_source is defined
+  ignore_errors: true
+  
+- name: Check if CA certificate exists
+  ansible.builtin.stat:
+    path: "{{ syslog_tls_ca_bundle_path }}"
+  register: ca_cert_stat
+  
+- name: Warn if CA certificate is missing
+  ansible.builtin.debug:
+    msg: |
+      WARNING: Syslog CA certificate not found at {{ syslog_tls_ca_bundle_path }}
+      TLS forwarding will be configured but may fail until CA cert is deployed.
+      
+      To deploy the CA certificate:
+      1. Copy the syslog server's CA certificate to the managed host
+      2. Place it at: {{ syslog_tls_ca_bundle_path }}
+  when: not ca_cert_stat.stat.exists | default(false)
+
+- name: Deploy rsyslog TLS forwarding configuration
+  ansible.builtin.template:
+    src: 60-tls-forward.conf.j2
+    dest: /etc/rsyslog.d/60-tls-forward.conf
+    mode: '0644'
+    owner: root
+    group: root
+    validate: 'rsyslogd -N1 -f %s'
+  notify: Restart rsyslog
+  
+- name: Ensure rsyslog is enabled and running
+  ansible.builtin.systemd:
+    name: rsyslog
+    enabled: true
+    state: started
+    
+- name: Test syslog TLS connectivity
+  ansible.builtin.shell: |
+    timeout 5 openssl s_client -connect {{ syslog_tls_target_host }}:{{ syslog_tls_target_port }} \
+      -CAfile {{ syslog_tls_ca_bundle_path }} </dev/null 2>/dev/null | \
+      grep -q "Verify return code: 0"
+  register: tls_test
+  changed_when: false
+  failed_when: false
+  when: ca_cert_stat.stat.exists | default(false)
+  
+- name: Display TLS connectivity status
+  ansible.builtin.debug:
+    msg: "{{ 'TLS connectivity test PASSED' if tls_test.rc | default(1) == 0 else 'TLS connectivity test FAILED or skipped' }}"
+
+- name: Send test syslog message
+  ansible.builtin.shell: |
+    logger -t stig-test "STIG rsyslog TLS forwarding configured for {{ inventory_hostname }}"
+  changed_when: false
+
+handlers:
+  - name: Restart rsyslog
+    ansible.builtin.systemd:
+      name: rsyslog
+      state: restarted

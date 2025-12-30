@@ -1,0 +1,60 @@
+---
+# ansible/playbooks/site.yml
+# Main site playbook for airgapped RPM repository
+#
+# Imports all component playbooks for full infrastructure management.
+#
+# Usage:
+#   ansible-playbook playbooks/site.yml
+#   ansible-playbook playbooks/site.yml --tags configure
+#   ansible-playbook playbooks/site.yml --tags patch
+
+- name: Site playbook - Airgapped RPM Repository Infrastructure
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Display playbook information
+      ansible.builtin.debug:
+        msg: |
+          Airgapped RPM Repository - Site Playbook
+          =========================================
+          Available tags:
+          - bootstrap: SSH key deployment
+          - configure: Repository client configuration
+          - manifests: Package manifest collection
+          - patch: Monthly security patching
+          - stig: STIG hardening
+          - all: Run all playbooks
+
+# Bootstrap SSH keys (run first with -k for password auth)
+- name: Bootstrap SSH keys
+  ansible.builtin.import_playbook: bootstrap_ssh_keys.yml
+  tags:
+    - bootstrap
+    - never
+
+# Configure repository clients
+- name: Configure internal repository
+  ansible.builtin.import_playbook: configure_internal_repo.yml
+  tags:
+    - configure
+    
+# Collect package manifests
+- name: Collect manifests
+  ansible.builtin.import_playbook: collect_manifests.yml
+  tags:
+    - manifests
+
+# Monthly security patching
+- name: Monthly security patching
+  ansible.builtin.import_playbook: patch_monthly_security.yml
+  tags:
+    - patch
+    - never
+
+# STIG hardening
+- name: STIG hardening
+  ansible.builtin.import_playbook: stig_harden_internal_vm.yml
+  tags:
+    - stig
+    - never

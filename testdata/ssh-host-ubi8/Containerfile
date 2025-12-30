@@ -1,0 +1,61 @@
+# testdata/ssh-host-ubi8/Containerfile
+# SSH-enabled UBI8 test container
+#
+# Simulates a managed RHEL 8 host for E2E testing of:
+# - SSH key deployment
+# - Repository client configuration
+# - Package manifest collection
+# - Patching operations
+
+FROM registry.access.redhat.com/ubi8/ubi:latest
+
+LABEL maintainer="RPM Repository Team"
+LABEL description="SSH-enabled UBI8 test host"
+
+# Install SSH server and utilities
+RUN dnf install -y \
+    openssh-server \
+    openssh-clients \
+    sudo \
+    python3 \
+    rsyslog \
+    rsyslog-gnutls \
+    procps-ng \
+    iproute \
+    && dnf clean all \
+    && rm -rf /var/cache/dnf
+
+# Configure SSH
+RUN ssh-keygen -A \
+    && sed -i 's/#PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config \
+    && sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config \
+    && sed -i 's/#PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config \
+    && mkdir -p /root/.ssh \
+    && chmod 700 /root/.ssh
+
+# Set root password for testing (use SSH keys in production)
+RUN echo 'root:testpassword' | chpasswd
+
+# Create test user
+RUN useradd -m -s /bin/bash testuser \
+    && echo 'testuser:testpassword' | chpasswd \
+    && echo 'testuser ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/testuser
+
+# Create directories for repo configuration
+RUN mkdir -p /etc/yum.repos.d /etc/pki/rpm-gpg
+
+# Create machine-id for host identification
+RUN systemd-machine-id-setup 2>/dev/null || uuidgen > /etc/machine-id
+
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Expose SSH port
+EXPOSE 22
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
+    CMD pgrep sshd || exit 1
+
+ENTRYPOINT ["/entrypoint.sh"]

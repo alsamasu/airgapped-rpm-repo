@@ -1,0 +1,113 @@
+---
+# ansible/roles/stig_base/tasks/main.yml
+# Base STIG hardening controls
+#
+# Implements fundamental security controls from RHEL STIG.
+
+- name: Ensure required packages are installed
+  ansible.builtin.dnf:
+    name:
+      - audit
+      - rsyslog
+      - rsyslog-gnutls
+      - aide
+      - policycoreutils-python-utils
+    state: present
+    
+- name: Set password quality requirements
+  ansible.builtin.lineinfile:
+    path: /etc/security/pwquality.conf
+    regexp: "^{{ item.key }}\\s*="
+    line: "{{ item.key }} = {{ item.value }}"
+    create: true
+    mode: '0644'
+  loop:
+    - { key: 'minlen', value: '15' }
+    - { key: 'dcredit', value: '-1' }
+    - { key: 'ucredit', value: '-1' }
+    - { key: 'lcredit', value: '-1' }
+    - { key: 'ocredit', value: '-1' }
+    - { key: 'minclass', value: '4' }
+    
+- name: Configure login.defs
+  ansible.builtin.lineinfile:
+    path: /etc/login.defs
+    regexp: "^{{ item.key }}\\s+"
+    line: "{{ item.key }} {{ item.value }}"
+  loop:
+    - { key: 'PASS_MAX_DAYS', value: '60' }
+    - { key: 'PASS_MIN_DAYS', value: '1' }
+    - { key: 'PASS_WARN_AGE', value: '7' }
+    - { key: 'UMASK', value: '077' }
+    
+- name: Set SSH hardening options
+  ansible.builtin.lineinfile:
+    path: /etc/ssh/sshd_config
+    regexp: "^#?{{ item.key }}\\s+"
+    line: "{{ item.key }} {{ item.value }}"
+    validate: 'sshd -t -f %s'
+  loop:
+    - { key: 'PermitRootLogin', value: 'prohibit-password' }
+    - { key: 'PasswordAuthentication', value: 'no' }
+    - { key: 'PermitEmptyPasswords', value: 'no' }
+    - { key: 'X11Forwarding', value: 'no' }
+    - { key: 'MaxAuthTries', value: '4' }
+    - { key: 'ClientAliveInterval', value: '600' }
+    - { key: 'ClientAliveCountMax', value: '0' }
+    - { key: 'LoginGraceTime', value: '60' }
+    - { key: 'Banner', value: '/etc/issue.net' }
+  notify: Restart sshd
+  
+- name: Create login banner
+  ansible.builtin.copy:
+    content: |
+      **************************************************************************
+      *                         AUTHORIZED ACCESS ONLY                          *
+      *                                                                          *
+      * This system is the property of the organization. Unauthorized access    *
+      * is prohibited. All activities are monitored and logged. By accessing    *
+      * this system, you consent to monitoring and agree to comply with all     *
+      * applicable security policies.                                            *
+      **************************************************************************
+    dest: /etc/issue.net
+    mode: '0644'
+    
+- name: Disable core dumps
+  ansible.builtin.lineinfile:
+    path: /etc/security/limits.conf
+    line: "* hard core 0"
+    create: true
+    mode: '0644'
+    
+- name: Set sysctl security parameters
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_set: true
+    state: present
+    reload: true
+  loop:
+    - { key: 'net.ipv4.conf.all.send_redirects', value: '0' }
+    - { key: 'net.ipv4.conf.default.send_redirects', value: '0' }
+    - { key: 'net.ipv4.conf.all.accept_source_route', value: '0' }
+    - { key: 'net.ipv4.conf.default.accept_source_route', value: '0' }
+    - { key: 'net.ipv4.conf.all.accept_redirects', value: '0' }
+    - { key: 'net.ipv4.conf.default.accept_redirects', value: '0' }
+    - { key: 'net.ipv4.conf.all.log_martians', value: '1' }
+    - { key: 'net.ipv4.icmp_echo_ignore_broadcasts', value: '1' }
+    - { key: 'net.ipv4.tcp_syncookies', value: '1' }
+    - { key: 'kernel.randomize_va_space', value: '2' }
+  ignore_errors: true  # Some may not apply in containers
+  
+- name: Ensure auditd is enabled
+  ansible.builtin.systemd:
+    name: auditd
+    enabled: true
+    state: started
+  ignore_errors: true
+
+handlers:
+  - name: Restart sshd
+    ansible.builtin.systemd:
+      name: sshd
+      state: restarted

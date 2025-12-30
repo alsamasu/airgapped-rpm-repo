@@ -47,7 +47,7 @@ help: ## Display this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(external|sm-|sync|ingest|compute|build-repos|export)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-25s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Internal Publisher Operations:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(internal|import|verify|publish|promote)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-25s$(NC) %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(internal|import|verify|publish|promote|ansible)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-25s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "Packer & VMware:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(packer)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-25s$(NC) %s\n", $$1, $$2}'
@@ -279,6 +279,138 @@ generate-client-config: ## Generate client configuration files
 	@echo -e "$(BLUE)Generating client configuration...$(NC)"
 	./scripts/internal/generate_client_config.sh
 	@echo -e "$(GREEN)Client configuration generated$(NC)"
+
+# ============================================================================
+# Internal Architecture (HTTPS + Ansible + Lifecycle)
+# ============================================================================
+
+# Container image names for internal architecture
+INTERNAL_PUBLISHER_IMAGE := airgap-rpm-publisher
+INTERNAL_ANSIBLE_IMAGE := airgap-ansible-control
+SSH_HOST_UBI8_IMAGE := ssh-host-ubi8
+SSH_HOST_UBI9_IMAGE := ssh-host-ubi9
+SYSLOG_SINK_IMAGE := tls-syslog-sink
+
+.PHONY: internal-build
+internal-build: ## Build internal architecture container images
+	@echo -e "$(BLUE)Building internal architecture containers...$(NC)"
+	$(CONTAINER_RUNTIME) build -t $(INTERNAL_PUBLISHER_IMAGE):latest \
+		-f containers/rpm-publisher/Containerfile containers/rpm-publisher/
+	$(CONTAINER_RUNTIME) build -t $(INTERNAL_ANSIBLE_IMAGE):latest \
+		-f containers/ansible-ee/Containerfile .
+	@echo -e "$(GREEN)Internal containers built$(NC)"
+
+.PHONY: internal-build-test
+internal-build-test: ## Build test containers for internal E2E
+	@echo -e "$(BLUE)Building test containers...$(NC)"
+	$(CONTAINER_RUNTIME) build -t $(SSH_HOST_UBI8_IMAGE):latest \
+		-f testdata/ssh-host-ubi8/Containerfile testdata/ssh-host-ubi8/
+	$(CONTAINER_RUNTIME) build -t $(SSH_HOST_UBI9_IMAGE):latest \
+		-f testdata/ssh-host-ubi9/Containerfile testdata/ssh-host-ubi9/
+	$(CONTAINER_RUNTIME) build -t $(SYSLOG_SINK_IMAGE):latest \
+		-f testdata/tls-syslog-sink/Containerfile testdata/tls-syslog-sink/
+	@echo -e "$(GREEN)Test containers built$(NC)"
+
+.PHONY: internal-up
+internal-up: internal-build internal-build-test ## Start internal architecture containers
+	@echo -e "$(BLUE)Starting internal architecture...$(NC)"
+	@# Create network if not exists
+	$(CONTAINER_RUNTIME) network create internal-net 2>/dev/null || true
+	@# Start syslog sink
+	$(CONTAINER_RUNTIME) run -d --name syslog-sink \
+		--network internal-net \
+		-p 6514:6514 -p 514:514 \
+		$(SYSLOG_SINK_IMAGE):latest
+	@# Start RPM publisher
+	$(CONTAINER_RUNTIME) run -d --name rpm-publisher \
+		--network internal-net \
+		-p 8080:8080 -p 8443:8443 \
+		-v $$(pwd)/testdata/repos:/data/repos:Z \
+		-v $$(pwd)/testdata/lifecycle:/data/lifecycle:Z \
+		$(INTERNAL_PUBLISHER_IMAGE):latest
+	@# Start SSH test hosts
+	$(CONTAINER_RUNTIME) run -d --name ssh-host-ubi9 \
+		--network internal-net \
+		-e AIRGAP_HOST_ID=test-ubi9-01 \
+		$(SSH_HOST_UBI9_IMAGE):latest
+	$(CONTAINER_RUNTIME) run -d --name ssh-host-ubi8 \
+		--network internal-net \
+		-e AIRGAP_HOST_ID=test-ubi8-01 \
+		$(SSH_HOST_UBI8_IMAGE):latest
+	@# Start Ansible control
+	$(CONTAINER_RUNTIME) run -d --name ansible-control \
+		--network internal-net \
+		-v $$(pwd)/ansible:/runner/project:Z \
+		$(INTERNAL_ANSIBLE_IMAGE):latest sleep infinity
+	@echo -e "$(GREEN)Internal architecture started$(NC)"
+	@echo "RPM Publisher: https://localhost:8443"
+	@echo "Syslog Sink: localhost:6514 (TLS), localhost:514 (TCP)"
+
+.PHONY: internal-down
+internal-down: ## Stop and remove internal architecture containers
+	@echo -e "$(BLUE)Stopping internal architecture...$(NC)"
+	$(CONTAINER_RUNTIME) stop ansible-control ssh-host-ubi8 ssh-host-ubi9 rpm-publisher syslog-sink 2>/dev/null || true
+	$(CONTAINER_RUNTIME) rm ansible-control ssh-host-ubi8 ssh-host-ubi9 rpm-publisher syslog-sink 2>/dev/null || true
+	$(CONTAINER_RUNTIME) network rm internal-net 2>/dev/null || true
+	@echo -e "$(GREEN)Internal architecture stopped$(NC)"
+
+.PHONY: internal-validate
+internal-validate: ## Validate internal architecture (HTTPS, repos, connectivity)
+	@echo -e "$(BLUE)Validating internal architecture...$(NC)"
+	@echo "Checking RPM publisher HTTPS..."
+	@curl -fsk https://localhost:8443/health >/dev/null && echo -e "$(GREEN)HTTPS: OK$(NC)" || echo -e "$(RED)HTTPS: FAILED$(NC)"
+	@echo "Checking syslog sink..."
+	@$(CONTAINER_RUNTIME) exec syslog-sink pgrep rsyslogd >/dev/null && echo -e "$(GREEN)Syslog: OK$(NC)" || echo -e "$(RED)Syslog: FAILED$(NC)"
+	@echo "Checking SSH hosts..."
+	@$(CONTAINER_RUNTIME) exec ssh-host-ubi9 pgrep sshd >/dev/null && echo -e "$(GREEN)SSH UBI9: OK$(NC)" || echo -e "$(RED)SSH UBI9: FAILED$(NC)"
+	@$(CONTAINER_RUNTIME) exec ssh-host-ubi8 pgrep sshd >/dev/null && echo -e "$(GREEN)SSH UBI8: OK$(NC)" || echo -e "$(RED)SSH UBI8: FAILED$(NC)"
+	@echo -e "$(GREEN)Validation complete$(NC)"
+
+.PHONY: ansible-shell
+ansible-shell: ## Open shell in Ansible control container
+	@echo -e "$(BLUE)Opening Ansible control shell...$(NC)"
+	$(CONTAINER_RUNTIME) exec -it ansible-control /bin/bash
+
+.PHONY: internal-logs
+internal-logs: ## Show logs from internal containers
+	@echo "=== RPM Publisher ===" && $(CONTAINER_RUNTIME) logs rpm-publisher --tail 20 2>/dev/null || true
+	@echo "=== Syslog Sink ===" && $(CONTAINER_RUNTIME) logs syslog-sink --tail 20 2>/dev/null || true
+	@echo "=== SSH Host UBI9 ===" && $(CONTAINER_RUNTIME) logs ssh-host-ubi9 --tail 10 2>/dev/null || true
+	@echo "=== SSH Host UBI8 ===" && $(CONTAINER_RUNTIME) logs ssh-host-ubi8 --tail 10 2>/dev/null || true
+
+.PHONY: internal-e2e
+internal-e2e: ## Run internal architecture E2E tests
+	@echo -e "$(BLUE)Running internal architecture E2E tests...$(NC)"
+	./scripts/internal_e2e_test.sh
+	@echo -e "$(GREEN)Internal E2E tests passed$(NC)"
+
+# ============================================================================
+# Ansible Operations (via container)
+# ============================================================================
+
+.PHONY: ansible-bootstrap
+ansible-bootstrap: ## Bootstrap SSH keys to test hosts
+	@echo -e "$(BLUE)Bootstrapping SSH keys...$(NC)"
+	$(CONTAINER_RUNTIME) exec ansible-control \
+		ansible-playbook /runner/project/playbooks/bootstrap_ssh_keys.yml
+
+.PHONY: ansible-configure-repo
+ansible-configure-repo: ## Configure internal repository on test hosts
+	@echo -e "$(BLUE)Configuring internal repository...$(NC)"
+	$(CONTAINER_RUNTIME) exec ansible-control \
+		ansible-playbook /runner/project/playbooks/configure_internal_repo.yml
+
+.PHONY: ansible-collect-manifests
+ansible-collect-manifests: ## Collect manifests from test hosts
+	@echo -e "$(BLUE)Collecting manifests...$(NC)"
+	$(CONTAINER_RUNTIME) exec ansible-control \
+		ansible-playbook /runner/project/playbooks/collect_manifests.yml
+
+.PHONY: ansible-stig
+ansible-stig: ## Run STIG hardening on test hosts
+	@echo -e "$(BLUE)Running STIG hardening...$(NC)"
+	$(CONTAINER_RUNTIME) exec ansible-control \
+		ansible-playbook /runner/project/playbooks/stig_harden_internal_vm.yml
 
 # ============================================================================
 # Packer & VMware
