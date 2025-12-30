@@ -1,0 +1,312 @@
+{
+  "validation_timestamp": "2024-12-30T16:15:00Z",
+  "artifacts": {
+    "documentation_validated": [
+      {
+        "path": "docs/deployment_guide.md",
+        "type": "markdown",
+        "lines": 195,
+        "modified": true
+      },
+      {
+        "path": "docs/administration_guide.md",
+        "type": "markdown",
+        "lines": 200,
+        "modified": true
+      }
+    ],
+    "documentation_generated": [
+      {
+        "path": "docs/deployment_artifacts.md",
+        "type": "markdown",
+        "sections": 8,
+        "created": true
+      }
+    ],
+    "configuration_files": [
+      {
+        "path": "config/spec.yaml",
+        "type": "yaml",
+        "purpose": "Primary deployment configuration",
+        "verified": true
+      },
+      {
+        "path": "ansible/inventories/lab.yml",
+        "type": "yaml",
+        "purpose": "Lab environment inventory",
+        "verified": true
+      },
+      {
+        "path": "Makefile",
+        "type": "makefile",
+        "purpose": "Build and deployment targets",
+        "verified": true
+      }
+    ],
+    "powercli_scripts": [
+      {
+        "path": "automation/powercli/generate-ks-iso.ps1",
+        "purpose": "Generate kickstart ISOs",
+        "verified": true
+      },
+      {
+        "path": "automation/powercli/deploy-rpm-servers.ps1",
+        "purpose": "Deploy VMs to vSphere",
+        "verified": true
+      },
+      {
+        "path": "automation/powercli/destroy-rpm-servers.ps1",
+        "purpose": "Destroy deployed VMs",
+        "verified": true
+      },
+      {
+        "path": "automation/powercli/discover-vsphere-defaults.ps1",
+        "purpose": "Discover vSphere environment",
+        "verified": true
+      },
+      {
+        "path": "automation/powercli/build-ovas.ps1",
+        "purpose": "Export VMs as OVA",
+        "verified": true
+      },
+      {
+        "path": "automation/powercli/wait-for-dhcp-and-report.ps1",
+        "purpose": "Report VM IPs",
+        "verified": true
+      },
+      {
+        "path": "automation/powercli/wait-for-install-complete.ps1",
+        "purpose": "Wait for OS installation",
+        "verified": true
+      },
+      {
+        "path": "automation/powercli/upload-isos.ps1",
+        "purpose": "Upload ISOs to datastore",
+        "verified": true
+      }
+    ],
+    "automation_scripts": [
+      {
+        "path": "automation/scripts/validate-spec.sh",
+        "purpose": "Validate spec.yaml",
+        "verified": true
+      },
+      {
+        "path": "automation/scripts/render-inventory.py",
+        "purpose": "Generate Ansible inventory",
+        "verified": true
+      },
+      {
+        "path": "automation/scripts/run-e2e-tests.sh",
+        "purpose": "Run E2E test suite",
+        "verified": true
+      },
+      {
+        "path": "automation/scripts/validate-operator-guide.sh",
+        "purpose": "Validate operator guide",
+        "verified": true
+      }
+    ],
+    "external_server_scripts": [
+      {
+        "path": "scripts/external/sync_repos.sh",
+        "purpose": "Sync from Red Hat CDN",
+        "verified": true
+      },
+      {
+        "path": "scripts/external/export_bundle.sh",
+        "purpose": "Create hand-carry bundle",
+        "verified": true
+      },
+      {
+        "path": "scripts/external/build_repos.sh",
+        "purpose": "Build repository metadata",
+        "verified": true
+      },
+      {
+        "path": "scripts/external/enable_repos.sh",
+        "purpose": "Enable required repos",
+        "verified": true
+      },
+      {
+        "path": "scripts/external/sm_register.sh",
+        "purpose": "Register with RHSM",
+        "verified": true
+      },
+      {
+        "path": "scripts/external/ingest_manifests.sh",
+        "purpose": "Process host manifests",
+        "verified": true
+      }
+    ],
+    "internal_server_scripts": [
+      {
+        "path": "scripts/internal/import_bundle.sh",
+        "purpose": "Import hand-carry bundle",
+        "verified": true
+      },
+      {
+        "path": "scripts/internal/promote_lifecycle.sh",
+        "purpose": "Promote between lifecycles",
+        "verified": true
+      },
+      {
+        "path": "scripts/internal/publish_repos.sh",
+        "purpose": "Publish repositories",
+        "verified": true
+      },
+      {
+        "path": "scripts/internal/verify_bundle.sh",
+        "purpose": "Verify imported bundle",
+        "verified": true
+      },
+      {
+        "path": "scripts/internal/generate_client_config.sh",
+        "purpose": "Generate client repo config",
+        "verified": true
+      }
+    ],
+    "ansible_playbooks": [
+      {
+        "path": "ansible/playbooks/bootstrap_ssh_keys.yml",
+        "purpose": "Bootstrap SSH key authentication",
+        "verified": true
+      },
+      {
+        "path": "ansible/playbooks/onboard_hosts.yml",
+        "purpose": "Onboard managed hosts",
+        "verified": true
+      },
+      {
+        "path": "ansible/playbooks/collect_manifests.yml",
+        "purpose": "Collect package manifests",
+        "verified": true
+      },
+      {
+        "path": "ansible/playbooks/patch_monthly_security.yml",
+        "purpose": "Apply security patches",
+        "verified": true
+      },
+      {
+        "path": "ansible/playbooks/replace_repo_tls_cert.yml",
+        "purpose": "Replace TLS certificate",
+        "verified": true
+      },
+      {
+        "path": "ansible/playbooks/stig_harden_internal_vm.yml",
+        "purpose": "Apply STIG hardening",
+        "verified": true
+      }
+    ],
+    "kickstart_templates": [
+      {
+        "path": "kickstart/ks-rpm-external.cfg",
+        "purpose": "External server kickstart",
+        "verified": true
+      },
+      {
+        "path": "kickstart/ks-rpm-internal.cfg",
+        "purpose": "Internal server kickstart",
+        "verified": true
+      }
+    ],
+    "output_directories": [
+      {
+        "path": "automation/artifacts/",
+        "purpose": "Generated automation artifacts"
+      },
+      {
+        "path": "automation/artifacts/e2e/",
+        "purpose": "E2E test reports"
+      },
+      {
+        "path": "automation/artifacts/ovas/",
+        "purpose": "Built OVA files"
+      },
+      {
+        "path": "automation/artifacts/guide-validate/",
+        "purpose": "Guide validation reports"
+      },
+      {
+        "path": "output/ks-isos/",
+        "purpose": "Generated kickstart ISOs"
+      }
+    ],
+    "runtime_paths_internal_server": [
+      "/var/lib/airgap-rpm/repo/testing/",
+      "/var/lib/airgap-rpm/repo/stable/",
+      "/var/lib/airgap-rpm/tls/",
+      "/var/lib/airgap-rpm/import/",
+      "/var/lib/airgap-rpm/manifests/",
+      "/var/lib/airgap-rpm/backups/"
+    ],
+    "runtime_paths_external_server": [
+      "/var/lib/airgap-rpm/sync/",
+      "/var/lib/airgap-rpm/export/",
+      "/var/lib/airgap-rpm/manifests/"
+    ],
+    "runtime_paths_managed_hosts": [
+      "/etc/yum.repos.d/airgap-*.repo",
+      "/etc/pki/tls/certs/airgap-ca.crt",
+      "/etc/pki/tls/certs/syslog-ca.crt"
+    ]
+  },
+  "makefile_targets": {
+    "discovery_and_init": [
+      "vsphere-discover",
+      "spec-init"
+    ],
+    "configuration": [
+      "validate-spec",
+      "render-inventory"
+    ],
+    "vmware_deployment": [
+      "generate-ks-iso",
+      "upload-isos",
+      "servers-deploy",
+      "servers-wait",
+      "servers-report",
+      "servers-destroy"
+    ],
+    "testing": [
+      "e2e",
+      "guide-validate",
+      "test",
+      "lint"
+    ],
+    "ova_building": [
+      "build-ovas"
+    ],
+    "ansible_operations": [
+      "ansible-onboard",
+      "ansible-bootstrap",
+      "manifests",
+      "patch",
+      "compliance",
+      "replace-tls-cert"
+    ],
+    "external_server_operations": [
+      "sm-register",
+      "enable-repos",
+      "sync",
+      "build-repos",
+      "export"
+    ],
+    "internal_server_operations": [
+      "import",
+      "verify",
+      "publish",
+      "promote"
+    ],
+    "workflows": [
+      "deploy-all",
+      "e2e-full"
+    ],
+    "aliases": [
+      "deploy",
+      "destroy",
+      "status",
+      "onboard"
+    ]
+  }
+}
