@@ -2,8 +2,7 @@
 Tests for the UpdateCalculator class.
 """
 
-import pytest
-from update_calculator.calculator import UpdateCalculator, PackageUpdate, UpdateResult
+from update_calculator.calculator import PackageUpdate, UpdateCalculator, UpdateResult
 
 
 class TestPackageUpdate:

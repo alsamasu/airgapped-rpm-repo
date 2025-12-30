@@ -41,7 +41,7 @@ help: ## Display this help message
 	@echo "Usage: make [target] [VAR=value]"
 	@echo ""
 	@echo "Build & Development:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(build|test|up|down|dev|lint|clean)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-25s$(NC) %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(build|test|e2e|up|down|dev|lint|clean)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-25s$(NC) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "External Builder Operations:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -E '(external|sm-|sync|ingest|compute|build-repos|export)' | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(GREEN)%-25s$(NC) %s\n", $$1, $$2}'
@@ -91,6 +91,18 @@ test-integration: build ## Run integration tests
 	@echo -e "$(BLUE)Running integration tests...$(NC)"
 	$(COMPOSE) --profile test up --abort-on-container-exit --exit-code-from test-runner
 	$(COMPOSE) --profile test down
+
+.PHONY: e2e
+e2e: ## Run full end-to-end tests (UBI8 + UBI9, builds images, validates full workflow)
+	@echo -e "$(BLUE)Running end-to-end tests...$(NC)"
+	./scripts/e2e_test.sh
+	@echo -e "$(GREEN)E2E tests passed$(NC)"
+
+.PHONY: e2e-keep
+e2e-keep: ## Run E2E tests and keep containers for debugging
+	@echo -e "$(BLUE)Running end-to-end tests (keeping containers)...$(NC)"
+	./scripts/e2e_test.sh --keep-containers
+	@echo -e "$(GREEN)E2E tests passed$(NC)"
 
 .PHONY: lint
 lint: lint-shell lint-python lint-yaml ## Run all linters

@@ -3,9 +3,10 @@ Pytest configuration and fixtures for update calculator tests.
 """
 
 import json
-import pytest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+import pytest
 
 
 @pytest.fixture

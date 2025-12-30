@@ -10,7 +10,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from functools import total_ordering
-from typing import Optional, Tuple, Union
 
 
 @total_ordering
@@ -217,7 +216,7 @@ def compare_versions(
     return _compare_version_strings(i_release, a_release)
 
 
-def parse_nevra(nevra_string: str) -> Optional[RPMVersion]:
+def parse_nevra(nevra_string: str) -> RPMVersion | None:
     """
     Parse a NEVRA string into an RPMVersion object.
 
@@ -269,7 +268,7 @@ def parse_nevra(nevra_string: str) -> Optional[RPMVersion]:
     return None
 
 
-def parse_rpm_qa_line(line: str) -> Optional[dict]:
+def parse_rpm_qa_line(line: str) -> dict | None:
     """
     Parse a line from rpm -qa output with custom format.
 

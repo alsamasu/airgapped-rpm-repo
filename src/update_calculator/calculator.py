@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterator, Optional, Union
+from typing import Any
 
-from .rpm_utils import compare_versions, is_update_available, format_evr
+from .rpm_utils import format_evr, is_update_available
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +149,7 @@ class UpdateCalculator:
         # Default fallback
         return f"rhel{major_version}"
 
-    def load_manifest(self, host_id: str) -> Optional[dict]:
+    def load_manifest(self, host_id: str) -> dict | None:
         """
         Load a host manifest.
 

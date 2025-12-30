@@ -2,14 +2,13 @@
 Tests for RPM utilities module.
 """
 
-import pytest
 from update_calculator.rpm_utils import (
     RPMVersion,
     compare_versions,
+    format_evr,
+    is_update_available,
     parse_nevra,
     parse_rpm_qa_line,
-    is_update_available,
-    format_evr,
 )
 
 

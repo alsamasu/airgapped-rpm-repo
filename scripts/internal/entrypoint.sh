@@ -8,8 +8,16 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source common functions
-source "${SCRIPT_DIR}/../common/logging.sh"
+# Source common functions if available
+if [[ -f "${SCRIPT_DIR}/../common/logging.sh" ]]; then
+    source "${SCRIPT_DIR}/../common/logging.sh"
+else
+    # Fallback logging functions
+    log_info() { echo "[INFO] $*"; }
+    log_success() { echo "[OK] $*"; }
+    log_error() { echo "[ERROR] $*" >&2; }
+    log_warn() { echo "[WARN] $*" >&2; }
+fi
 
 # Configuration
 DATA_DIR="${RPMSERVER_DATA_DIR:-/data}"
@@ -21,12 +29,6 @@ log_info "Starting internal publisher..."
 log_info "Mode: ${RPMSERVER_MODE:-internal}"
 log_info "Data directory: ${DATA_DIR}"
 log_info "HTTP port: ${HTTP_PORT}"
-
-# Initialize if needed
-if [[ ! -f "${DATA_DIR}/internal.conf" ]]; then
-    log_info "Initializing internal publisher environment..."
-    "${SCRIPT_DIR}/../../rpmserverctl" init-internal
-fi
 
 # Create required directories
 mkdir -p "${LOG_DIR}"
@@ -84,6 +86,57 @@ HTML
 
 create_index_html
 
+# Ensure SSL certificates exist (generate self-signed if missing)
+ensure_ssl_certificates() {
+    local cert_file="/etc/pki/tls/certs/localhost.crt"
+    local key_file="/etc/pki/tls/private/localhost.key"
+
+    # Check if SSL config exists
+    if [[ ! -f /etc/httpd/conf.d/ssl.conf ]]; then
+        log_info "SSL module not configured, skipping certificate check"
+        return 0
+    fi
+
+    # Check if certificates already exist and are valid
+    if [[ -f "${cert_file}" && -f "${key_file}" ]]; then
+        if [[ -s "${cert_file}" && -s "${key_file}" ]]; then
+            log_info "SSL certificates already exist"
+            return 0
+        fi
+    fi
+
+    log_info "Generating self-signed SSL certificate..."
+
+    # Create directories if needed
+    mkdir -p /etc/pki/tls/certs /etc/pki/tls/private
+
+    # Generate self-signed certificate (valid for 365 days)
+    if command -v openssl &>/dev/null; then
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout "${key_file}" \
+            -out "${cert_file}" \
+            -subj "/C=US/ST=Internal/L=Internal/O=RPM Repository/OU=IT/CN=localhost" \
+            2>/dev/null
+
+        if [[ -f "${cert_file}" && -f "${key_file}" ]]; then
+            chmod 600 "${key_file}"
+            chmod 644 "${cert_file}"
+            log_success "Self-signed SSL certificate generated"
+            return 0
+        else
+            log_warn "Failed to generate SSL certificate, disabling SSL"
+        fi
+    else
+        log_warn "OpenSSL not available, disabling SSL"
+    fi
+
+    # If we couldn't generate certificates, disable SSL
+    rm -f /etc/httpd/conf.d/ssl.conf /etc/httpd/conf.modules.d/00-ssl.conf 2>/dev/null || true
+    log_info "SSL disabled"
+}
+
+ensure_ssl_certificates
+
 # Configure Apache
 configure_apache() {
     log_info "Configuring Apache..."
@@ -91,71 +144,30 @@ configure_apache() {
     # Update port in configuration
     sed -i "s/Listen 8080/Listen ${HTTP_PORT}/" /etc/httpd/conf/httpd.conf 2>/dev/null || true
 
-    # Create custom configuration
-    cat > /etc/httpd/conf.d/rpmrepo.conf << APACHE
-# Internal RPM Repository Configuration
+    # Add ServerName to avoid warning
+    if ! grep -q "^ServerName" /etc/httpd/conf/httpd.conf; then
+        echo "ServerName localhost" >> /etc/httpd/conf/httpd.conf
+    fi
 
-ServerName localhost
+    # Update logging configuration in repos.conf (if exists)
+    # Don't create duplicate Alias directives - they're already in repos.conf from Dockerfile
+    if [[ -f /etc/httpd/conf.d/repos.conf ]]; then
+        # Just add logging configuration
+        cat >> /etc/httpd/conf.d/repos.conf << APACHE
 
-# Aliases for repository paths
-Alias /repos ${DATA_DIR}/repos
-Alias /lifecycle ${DATA_DIR}/lifecycle
-Alias /keys ${DATA_DIR}/keys
-
-# Directory configurations
-<Directory "${DATA_DIR}/repos">
-    Options Indexes FollowSymLinks
-    AllowOverride None
-    Require all granted
-    IndexOptions FancyIndexing HTMLTable VersionSort NameWidth=* DescriptionWidth=*
-</Directory>
-
-<Directory "${DATA_DIR}/lifecycle">
-    Options Indexes FollowSymLinks
-    AllowOverride None
-    Require all granted
-    IndexOptions FancyIndexing HTMLTable VersionSort NameWidth=* DescriptionWidth=*
-</Directory>
-
-<Directory "${DATA_DIR}/keys">
-    Options Indexes FollowSymLinks
-    AllowOverride None
-    Require all granted
-</Directory>
-
-# Security headers
-<IfModule mod_headers.c>
-    Header always set X-Content-Type-Options "nosniff"
-    Header always set X-Frame-Options "DENY"
-</IfModule>
-
-# Logging
+# Runtime logging configuration
 ErrorLog ${LOG_DIR}/httpd-error.log
 CustomLog ${LOG_DIR}/httpd-access.log combined
-
-# Performance
-EnableSendfile On
-KeepAlive On
-MaxKeepAliveRequests 100
-KeepAliveTimeout 5
 APACHE
+    fi
 
     log_info "Apache configured"
 }
 
 configure_apache
 
-# Show status
-"${SCRIPT_DIR}/../../rpmserverctl" status
-
 log_success "Internal publisher ready"
 log_info "Repository URL: http://localhost:${HTTP_PORT}/repos/"
-log_info ""
-log_info "Available commands:"
-log_info "  make import       - Import bundle"
-log_info "  make verify       - Verify bundle"
-log_info "  make publish      - Publish to channel"
-log_info "  make promote      - Promote between channels"
 
 # Start Apache in foreground
 log_info "Starting HTTP server on port ${HTTP_PORT}..."
