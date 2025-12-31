@@ -4,14 +4,33 @@
 
 ---
 
+## Step 0: Install Dependencies (Air-gapped)
+
+Extract and install from the provided ZIP files:
+
+```powershell
+# Extract packages
+Expand-Archive -Path .\airgapped-deps.zip -DestinationPath C:\src\airgapped-deps
+Expand-Archive -Path .\airgapped-rpm-repo.zip -DestinationPath C:\src\airgapped-rpm-repo
+
+# Install dependencies (run as Administrator)
+cd C:\src\airgapped-deps
+.\install-deps.ps1
+
+# Open new PowerShell 7 terminal
+pwsh
+```
+
+---
+
 ## Prerequisites (Minimal)
 
-| Requirement | Install Command | Verify |
-|-------------|-----------------|--------|
-| PowerShell 7+ | [Download](https://github.com/PowerShell/PowerShell/releases) | `$PSVersionTable.PSVersion` |
-| VMware PowerCLI | `Install-Module VMware.PowerCLI -Scope CurrentUser` | `Get-Module -ListAvailable VMware.PowerCLI` |
+| Requirement | Verify Command |
+|-------------|----------------|
+| PowerShell 7+ | `$PSVersionTable.PSVersion` (must show 7.x) |
+| VMware PowerCLI | `Get-Module -ListAvailable VMware.PowerCLI` |
 
-**NOT REQUIRED:** Python, Windows ADK, powershell-yaml, GNU Make, WSL
+**NOT REQUIRED:** Git, Python, Windows ADK, powershell-yaml, GNU Make, WSL
 
 ---
 

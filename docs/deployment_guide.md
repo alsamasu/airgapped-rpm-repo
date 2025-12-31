@@ -32,25 +32,75 @@ The deployment automation uses VMware PowerCLI scripts with kickstart injection 
 >
 > Any deviation from this list is a documentation defect.
 
+## Obtaining the Software
+
+This project uses **ZIP-based delivery** for air-gapped environments. Git is NOT required.
+
+### Package Contents
+
+You will receive two ZIP files:
+
+| Package | Contents | Size |
+|---------|----------|------|
+| `airgapped-deps.zip` | PowerShell 7 MSI, VMware.PowerCLI modules | ~200MB |
+| `airgapped-rpm-repo.zip` | Repository scripts and configuration | ~5MB |
+
+### Extraction Steps
+
+```powershell
+# Create working directory
+New-Item -ItemType Directory -Force -Path C:\src
+
+# Extract dependencies (run first)
+Expand-Archive -Path .\airgapped-deps.zip -DestinationPath C:\src\airgapped-deps
+
+# Extract repository
+Expand-Archive -Path .\airgapped-rpm-repo.zip -DestinationPath C:\src\airgapped-rpm-repo
+```
+
+### Install Dependencies (Air-gapped)
+
+Before using the operator workflow, install the prerequisites from the airgapped-deps package:
+
+```powershell
+# Open PowerShell as Administrator
+cd C:\src\airgapped-deps
+
+# Verify checksums (recommended)
+.\checksums\verify.ps1
+
+# Install PowerShell 7 and VMware.PowerCLI
+.\install-deps.ps1
+```
+
+After installation, open a **new PowerShell 7 terminal** (`pwsh`) to continue.
+
+---
+
 ## Windows 11 Laptop (Primary Workflow)
 
 This is the **recommended workflow** for operators running from a Windows 11 laptop.
 
 ### Prerequisites
 
-1. **PowerShell 7+** (download from [Microsoft](https://github.com/PowerShell/PowerShell/releases))
+If you installed from `airgapped-deps.zip` (see above), these are already satisfied.
+
+1. **PowerShell 7+**
    ```powershell
-   # Verify version
+   # Verify version (must be 7.x)
    $PSVersionTable.PSVersion
    ```
 
 2. **VMware PowerCLI Module**
    ```powershell
-   Install-Module -Name VMware.PowerCLI -Scope CurrentUser -Force
+   # Verify installed
+   Get-Module -ListAvailable VMware.PowerCLI
+
+   # Configure (first time only)
    Set-PowerCLIConfiguration -InvalidCertificateAction Ignore -Confirm:$false
    ```
 
-> **Note:** Per the guardrails above, Python, Windows ADK, powershell-yaml, and WSL are explicitly **NOT REQUIRED** for the operator workflow.
+> **Note:** Per the guardrails above, Python, Windows ADK, powershell-yaml, Git, and WSL are explicitly **NOT REQUIRED** for the operator workflow. Use ZIP-based delivery.
 
 ### Set VMware Credentials
 

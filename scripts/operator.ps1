@@ -226,7 +226,7 @@ PREREQUISITES:
     - PowerShell 7.0 or later
     - VMware PowerCLI module: Install-Module VMware.PowerCLI -Scope CurrentUser
 
-    NOT REQUIRED: Python, Windows ADK, powershell-yaml, GNU Make, WSL
+    NOT REQUIRED: Git, Python, Windows ADK, powershell-yaml, GNU Make, WSL
 
 "@ -ForegroundColor White
 }
