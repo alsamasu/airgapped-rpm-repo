@@ -5,6 +5,10 @@
 #
 # Configuration: config/spec.yaml
 #
+# WINDOWS OPERATORS:
+#   Use scripts/operator.ps1 instead of make for a native PowerShell experience.
+#   See docs/deployment_guide.md for the Windows 11 laptop workflow.
+#
 # Usage:
 #   make help                  - Show available targets
 #   make vsphere-discover      - Discover vSphere environment
@@ -42,6 +46,10 @@ help:
 	@echo ""
 	@echo "$(CYAN)Airgapped RPM Repository System$(NC)"
 	@echo "=================================="
+	@echo ""
+	@echo "$(YELLOW)Windows 11 Laptop:$(NC)"
+	@echo "  Use: pwsh scripts/operator.ps1 <command>"
+	@echo "  See: docs/deployment_guide.md"
 	@echo ""
 	@echo "$(GREEN)Discovery & Initialization:$(NC)"
 	@echo "  vsphere-discover   Discover vSphere environment and generate defaults"
