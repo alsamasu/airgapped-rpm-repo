@@ -12,19 +12,19 @@ The deployment automation uses VMware PowerCLI scripts with kickstart injection 
 1. **Kickstart ISO Injection**: Direct deployment from RHEL 9.6 ISO with automated kickstart configuration
 2. **OVA Deployment**: Pre-built appliance images with first-boot customization via OVF properties
 
-All automation artifacts reside in the repository under `automation/powercli/` and `automation/kickstart/`.
-
 ---
 
-## Prerequisites
+## Windows 11 Laptop (Primary Workflow)
 
-### Operator Workstation Requirements
+This is the **recommended workflow** for operators running from a Windows 11 laptop.
 
-The deployment automation can be run from Windows, Linux, or macOS. Install the required software for your platform:
+### Prerequisites
 
-#### Windows 11 (Recommended)
-
-1. **PowerShell 5.1+** (included with Windows 11)
+1. **PowerShell 7+** (download from [Microsoft](https://github.com/PowerShell/PowerShell/releases))
+   ```powershell
+   # Verify version
+   $PSVersionTable.PSVersion
+   ```
 
 2. **VMware PowerCLI Module**
    ```powershell
@@ -32,7 +32,7 @@ The deployment automation can be run from Windows, Linux, or macOS. Install the 
    Set-PowerCLIConfiguration -InvalidCertificateAction Ignore -Confirm:$false
    ```
 
-3. **PowerShell YAML Module** (for configuration parsing)
+3. **PowerShell YAML Module**
    ```powershell
    Install-Module -Name powershell-yaml -Scope CurrentUser -Force
    ```
@@ -47,132 +47,90 @@ The deployment automation can be run from Windows, Linux, or macOS. Install the 
    pip install pyyaml
    ```
 
-#### Linux / macOS
+6. **Git for Windows** (optional, for bash script compatibility)
+   - Download from [git-scm.com](https://git-scm.com/download/win)
 
-1. **PowerShell Core**
-   ```bash
-   # RHEL/CentOS
-   sudo dnf install -y powershell
+### Set VMware Credentials
 
-   # Ubuntu/Debian
-   sudo apt-get install -y powershell
-
-   # macOS
-   brew install powershell
-   ```
-
-2. **VMware PowerCLI Module**
-   ```bash
-   pwsh -Command "Install-Module -Name VMware.PowerCLI -Scope CurrentUser -Force"
-   ```
-
-3. **ISO creation tools**
-   ```bash
-   # RHEL/CentOS
-   sudo dnf install -y genisoimage
-
-   # Ubuntu/Debian
-   sudo apt-get install -y genisoimage
-
-   # macOS
-   brew install cdrtools
-   ```
-
-4. **Python 3 with PyYAML**
-   ```bash
-   sudo dnf install -y python3 python3-pyyaml  # RHEL
-   sudo apt-get install -y python3 python3-yaml  # Debian
-   ```
-
-5. **Make** (optional, for using Makefile targets)
-   ```bash
-   sudo dnf install -y make  # RHEL
-   sudo apt-get install -y make  # Debian
-   ```
-
-### VMware Environment
-
-- vCenter Server 7.0+ or ESXi 7.0+ with direct access
-- VM deployment permissions
-- Datastore with sufficient space (500GB+ recommended)
-- Network port group with DHCP enabled
-
-### Credentials
-
-Set VMware credentials via environment variables:
-
-**Windows PowerShell:**
 ```powershell
 $env:VMWARE_USER = "administrator@vsphere.local"
-$env:VMWARE_PASSWORD = "YourPassword"
+$env:VMWARE_PASSWORD = "YourSecurePassword"
 ```
 
-**Linux/macOS:**
-```bash
-export VMWARE_USER="administrator@vsphere.local"
-export VMWARE_PASSWORD="YourPassword"
+### Quick Start: Full Deployment
+
+```powershell
+# 1. Initialize configuration from vSphere discovery
+.\scripts\operator.ps1 init-spec
+
+# 2. Edit spec.yaml with your environment values
+notepad config\spec.yaml
+
+# 3. Validate configuration
+.\scripts\operator.ps1 validate-spec
+
+# 4. Deploy servers (will prompt for confirmation)
+.\scripts\operator.ps1 deploy-servers
+
+# 5. Check deployment status and get IP addresses
+.\scripts\operator.ps1 report-servers
+```
+
+### Operator CLI Reference
+
+The `scripts\operator.ps1` script is the single canonical entrypoint for all operations:
+
+| Command | Description |
+|---------|-------------|
+| `.\scripts\operator.ps1 init-spec` | Discover vSphere and initialize spec.yaml |
+| `.\scripts\operator.ps1 validate-spec` | Validate spec.yaml configuration |
+| `.\scripts\operator.ps1 deploy-servers` | Deploy External and Internal RPM servers |
+| `.\scripts\operator.ps1 report-servers` | Report VM status and DHCP IPs |
+| `.\scripts\operator.ps1 destroy-servers` | Destroy all deployed VMs |
+| `.\scripts\operator.ps1 build-ovas` | Build OVAs from running VMs |
+| `.\scripts\operator.ps1 guide-validate` | Validate operator guides |
+| `.\scripts\operator.ps1 e2e` | Run full E2E test suite |
+
+#### Common Options
+
+```powershell
+# Skip confirmation prompts
+.\scripts\operator.ps1 deploy-servers -Force
+
+# Custom spec path
+.\scripts\operator.ps1 validate-spec -SpecPath C:\path\to\spec.yaml
+
+# Keep VMs after E2E test
+.\scripts\operator.ps1 e2e -KeepVMs
+
+# Show what would be done without executing
+.\scripts\operator.ps1 deploy-servers -WhatIf
+
+# Get help
+.\scripts\operator.ps1 -Help
 ```
 
 ---
 
-## Windows PowerShell Commands
+## Detailed Deployment Steps
 
-Windows operators can run PowerShell scripts directly instead of using `make` targets.
+### Step 1: Initialize Configuration
 
-| Make Command | Windows PowerShell Equivalent |
-|--------------|------------------------------|
-| `make vsphere-discover` | `.\automation\powercli\discover-vsphere-defaults.ps1 -OutputDir automation\artifacts` |
-| `make spec-init` | Run discover, then: `Copy-Item automation\artifacts\spec.detected.yaml config\spec.yaml` |
-| `make validate-spec` | `.\automation\powercli\validate-spec.ps1 -SpecPath config\spec.yaml` |
-| `make generate-ks-iso` | `.\automation\powercli\generate-ks-iso.ps1 -SpecPath config\spec.yaml -OutputDir output\ks-isos` |
-| `make servers-deploy` | `.\automation\powercli\deploy-rpm-servers.ps1 -SpecPath config\spec.yaml` |
-| `make servers-wait` | `.\automation\powercli\wait-for-install-complete.ps1 -SpecPath config\spec.yaml` |
-| `make servers-report` | `.\automation\powercli\wait-for-dhcp-and-report.ps1 -SpecPath config\spec.yaml` |
-| `make servers-destroy` | `.\automation\powercli\destroy-rpm-servers.ps1 -SpecPath config\spec.yaml` |
-| `make build-ovas` | `.\automation\powercli\build-ovas.ps1 -SpecPath config\spec.yaml -OutputDir automation\artifacts\ovas` |
+Discover your vSphere environment and generate initial configuration:
 
-**Example: Full Windows Deployment**
 ```powershell
-# Set credentials
-$env:VMWARE_USER = "administrator@vsphere.local"
-$env:VMWARE_PASSWORD = "YourPassword"
-
-# Discover vSphere environment
-.\automation\powercli\discover-vsphere-defaults.ps1 -OutputDir automation\artifacts
-
-# Copy and edit spec.yaml
-Copy-Item automation\artifacts\spec.detected.yaml config\spec.yaml
-notepad config\spec.yaml  # Edit with your values
-
-# Validate configuration
-.\automation\powercli\validate-spec.ps1 -SpecPath config\spec.yaml
-
-# Generate kickstart ISOs
-.\automation\powercli\generate-ks-iso.ps1 -SpecPath config\spec.yaml -OutputDir output\ks-isos
-
-# Deploy VMs
-.\automation\powercli\deploy-rpm-servers.ps1 -SpecPath config\spec.yaml
-
-# Wait for installation
-.\automation\powercli\wait-for-install-complete.ps1 -SpecPath config\spec.yaml
-
-# Get IP addresses
-.\automation\powercli\wait-for-dhcp-and-report.ps1 -SpecPath config\spec.yaml
+.\scripts\operator.ps1 init-spec
 ```
 
----
+This will:
+1. Connect to vCenter/ESXi
+2. Discover datacenters, clusters, datastores, and networks
+3. Generate `automation/artifacts/spec.detected.yaml`
+4. Copy to `config/spec.yaml`
 
-## Deployment Inputs
+### Step 2: Customize Configuration
 
-### Required Files
-
-1. RHEL 9.6 DVD ISO image (downloaded from Red Hat Customer Portal)
-2. VMware vCenter credentials with VM deployment permissions
-3. Completed `config/spec.yaml` configuration file
-
-### Configuration File: config/spec.yaml
-
-The primary configuration file controls all deployment parameters:
+Edit `config/spec.yaml` with your environment-specific values:
 
 ```yaml
 vcenter:
@@ -180,17 +138,13 @@ vcenter:
   datacenter: "Datacenter"
   cluster: "Cluster01"
   datastore: "datastore1"
-  folder: ""  # Optional: VM folder path
-  resource_pool: ""  # Optional
-  # Credentials via environment: VMWARE_USER, VMWARE_PASSWORD
 
 network:
   portgroup_name: "LAN"
-  dhcp: true  # Required; static IP not supported in automated install
+  dhcp: true
 
 isos:
-  rhel96_iso_path: "/isos/rhel-9.6-x86_64-dvd.iso"
-  iso_datastore_folder: "isos"
+  rhel96_iso_path: "[datastore1] isos/rhel-9.6-x86_64-dvd.iso"
 
 vm_names:
   rpm_external: "rpm-external"
@@ -215,108 +169,66 @@ compliance:
   enable_fips: true
 ```
 
-### Generating Initial Configuration
+### Step 3: Validate Configuration
 
-1. Run the spec initialization target:
-   ```bash
-   make spec-init
-   ```
-
-2. Edit `config/spec.yaml` with your environment values
-
-3. Validate the configuration:
-   ```bash
-   make validate-spec
-   ```
-
----
-
-## vSphere Environment Discovery
-
-1. Execute the discovery target:
-   ```bash
-   make vsphere-discover
-   ```
-
-2. Review the generated discovery output:
-   ```bash
-   cat automation/artifacts/vsphere-defaults.json
-   cat automation/artifacts/spec.detected.yaml
-   ```
-
----
-
-## Deployment Method Selection
-
-### Method 1: Kickstart ISO Injection (Recommended for Initial Deployment)
-
-**Use when:** Deploying for the first time, FIPS mode needed, custom partitioning required.
-
-### Method 2: OVA Deployment (Recommended for Replication)
-
-**Use when:** Deploying additional instances, faster deployment preferred.
-
----
-
-## Kickstart ISO Deployment
-
-### Step 1: Generate Kickstart ISOs
-
-```bash
-make generate-ks-iso
+```powershell
+.\scripts\operator.ps1 validate-spec
 ```
 
-Alternatively, run the PowerCLI script directly:
-```bash
-pwsh automation/powercli/generate-ks-iso.ps1 -SpecPath config/spec.yaml
+Fix any reported errors before proceeding.
+
+### Step 4: Deploy Servers
+
+```powershell
+.\scripts\operator.ps1 deploy-servers
 ```
 
-### Step 2: Deploy VMs
+The deployment will:
+1. Generate kickstart ISOs
+2. Upload ISOs to VMware datastore
+3. Create VMs with correct sizing
+4. Mount RHEL ISO and kickstart ISO
+5. Power on VMs for automated installation
 
-```bash
-make servers-deploy
-```
+Installation typically takes 10-20 minutes per VM.
 
-### Step 3: Wait for Installation and Discover IPs
+### Step 5: Verify Deployment
 
-Wait for VMs to complete installation and obtain DHCP-assigned IPs:
-```bash
-make servers-wait
-make servers-report
-```
+```powershell
+# Get VM status and IP addresses
+.\scripts\operator.ps1 report-servers
 
-### Step 4: Validate Installation
+# Verify SSH connectivity
+ssh admin@<internal-ip> "cat /etc/airgap-role"
 
-Using the IPs from `servers-report`:
-```bash
+# Check internal server services
 ssh admin@<internal-ip> "systemctl --user -M rpmops@ status airgap-rpm-publisher.service"
-curl -k https://<internal-ip>/repo/stable/
+
+# Test HTTPS endpoint
+curl -k https://<internal-ip>:8443/
 ```
 
 ---
 
-## OVA Deployment
+## Post-Deployment Validation
 
-### Step 1: Build OVA Images
+### Run E2E Tests
 
-```bash
-make build-ovas
-```
-
-### Step 2: Deploy from OVA
-
-Deploy through vSphere Client or PowerCLI with OVF properties for hostname and network configuration.
-
----
-
-## Post-Install Validation
-
-Run the E2E test suite:
-```bash
-make e2e
+```powershell
+.\scripts\operator.ps1 e2e
 ```
 
 Reports are generated in `automation/artifacts/e2e/`.
+
+### Build OVA Appliances
+
+After successful E2E validation, export VMs as OVAs for future deployments:
+
+```powershell
+.\scripts\operator.ps1 build-ovas
+```
+
+OVAs are saved to `automation/artifacts/ovas/`.
 
 ---
 
@@ -327,15 +239,106 @@ Reports are generated in `automation/artifacts/e2e/`.
 | Repository Service | Running under rpmops user |
 | TLS Certificate | Self-signed (replace for production) |
 | Repository Content | Empty (import first bundle) |
+| FIPS Mode | Enabled on internal server |
 
 ---
 
-## Deployment Troubleshooting
+## Appendix A: Linux/macOS Operators
+
+For operators on Linux or macOS, you can use either the PowerShell operator script (after installing PowerShell Core) or the Makefile targets.
+
+### Install PowerShell Core
+
+```bash
+# RHEL/CentOS
+sudo dnf install -y powershell
+
+# Ubuntu/Debian
+sudo apt-get install -y powershell
+
+# macOS
+brew install powershell
+```
+
+Then use the same operator commands:
+
+```bash
+pwsh scripts/operator.ps1 validate-spec
+pwsh scripts/operator.ps1 deploy-servers
+```
+
+### Alternative: Makefile Targets
+
+If GNU Make is available:
+
+| Make Command | Equivalent Operator Command |
+|--------------|----------------------------|
+| `make spec-init` | `.\scripts\operator.ps1 init-spec` |
+| `make validate-spec` | `.\scripts\operator.ps1 validate-spec` |
+| `make servers-deploy` | `.\scripts\operator.ps1 deploy-servers` |
+| `make servers-report` | `.\scripts\operator.ps1 report-servers` |
+| `make servers-destroy` | `.\scripts\operator.ps1 destroy-servers` |
+| `make build-ovas` | `.\scripts\operator.ps1 build-ovas` |
+| `make guide-validate` | `.\scripts\operator.ps1 guide-validate` |
+| `make e2e` | `.\scripts\operator.ps1 e2e` |
+
+---
+
+## Appendix B: Testing/Validation Only - Windows 11 VM in vSphere
+
+> **WARNING**: This section describes an **optional testing harness** for CI-like validation. It is **NOT** part of the production operator workflow. The primary workflow uses a Windows 11 laptop directly.
+
+For automated testing environments, you can run the operator commands from a Windows 11 VM deployed in vSphere. This is useful for:
+- CI/CD pipeline integration
+- Automated regression testing
+- Isolated test environments
+
+### Test Harness Location
+
+```
+tests/windows-vsphere-operator/
+  run.ps1           # Test harness entry script
+  README.md         # Test harness documentation
+```
+
+### Running the Test Harness
+
+```powershell
+# From the project root
+.\tests\windows-vsphere-operator\run.ps1
+
+# Or with specific options
+.\tests\windows-vsphere-operator\run.ps1 -VMName "test-operator-vm" -SkipVMDeploy
+```
+
+### Test Harness Artifacts
+
+Test results are written to: `automation/artifacts/windows-vsphere-test/`
+
+---
+
+## Troubleshooting
 
 ### Kickstart Installation Fails
 - Verify kickstart ISO has OEMDRV volume label
 - Verify both ISOs are attached to VM
+- Check vSphere console for boot errors
 
 ### Repository Service Not Accessible
-- Check service: `systemctl --user -M rpmops@ status airgap-rpm-publisher.service`
-- Check firewall: `sudo firewall-cmd --list-ports`
+- Check service: `ssh admin@<ip> "systemctl --user -M rpmops@ status airgap-rpm-publisher.service"`
+- Check firewall: `ssh admin@<ip> "sudo firewall-cmd --list-ports"`
+
+### PowerCLI Connection Fails
+- Verify VMWARE_USER and VMWARE_PASSWORD environment variables
+- Check vCenter/ESXi accessibility: `Test-NetConnection vcenter.example.local -Port 443`
+- Verify PowerCLI is installed: `Get-Module -ListAvailable VMware.PowerCLI`
+
+### ISO Upload Fails
+- Verify datastore has sufficient space
+- Check datastore permissions for the user
+- Verify ISO path in spec.yaml is correct
+
+### Python Not Found
+- Install Python 3: `winget install Python.Python.3.12`
+- Verify installation: `python --version`
+- Install PyYAML: `pip install pyyaml`

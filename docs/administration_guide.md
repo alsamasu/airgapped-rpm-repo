@@ -6,8 +6,37 @@ This guide covers day-to-day operations and maintenance of the airgapped RPM rep
 
 - RHEL 9.6 internal server deployed per the Deployment Guide
 - Rootless Podman running under the `rpmops` service user
-- Repository served over HTTPS on port 443
+- Repository served over HTTPS on port 8443
 - Managed hosts onboarded and consuming packages from the internal repository
+
+---
+
+## Windows 11 Laptop Operations
+
+All administrative operations can be performed from a Windows 11 laptop using PowerShell and SSH.
+
+### Prerequisites
+
+Ensure you have:
+- PowerShell 7+ installed
+- SSH client (built into Windows 11)
+- Server IP addresses from initial deployment
+
+### Quick Reference
+
+```powershell
+# Validate current configuration
+.\scripts\operator.ps1 validate-spec
+
+# Get server status and IPs
+.\scripts\operator.ps1 report-servers
+
+# Validate operator guides
+.\scripts\operator.ps1 guide-validate
+
+# Run E2E tests
+.\scripts\operator.ps1 e2e
+```
 
 ---
 
@@ -17,12 +46,11 @@ This guide covers day-to-day operations and maintenance of the airgapped RPM rep
 
 | Path | Server | Purpose |
 |------|--------|---------|
-| `/var/lib/airgap-rpm/repo/` | Internal | Repository content root |
-| `/var/lib/airgap-rpm/tls/` | Internal | TLS certificates |
-| `/var/lib/airgap-rpm/import/` | Internal | Bundle import staging |
-| `/var/lib/airgap-rpm/export/` | External | Bundle export staging |
-| `/var/lib/airgap-rpm/sync/` | External | Synced repository mirror |
-| `/var/lib/airgap-rpm/manifests/` | Both | Host manifest storage |
+| `/srv/airgap/data/` | Internal | Repository content root |
+| `/srv/airgap/certs/` | Internal | TLS certificates |
+| `/srv/airgap/data/import/` | Internal | Bundle import staging |
+| `/data/export/` | External | Bundle export staging |
+| `/data/repos/` | External | Synced repository mirror |
 
 ---
 
@@ -30,19 +58,20 @@ This guide covers day-to-day operations and maintenance of the airgapped RPM rep
 
 ### Check Service Status
 
-```bash
+```powershell
+# From Windows laptop
 ssh admin@<internal-ip> "systemctl --user -M rpmops@ status airgap-rpm-publisher.service"
 ```
 
 ### Restart Repository Service
 
-```bash
+```powershell
 ssh admin@<internal-ip> "systemctl --user -M rpmops@ restart airgap-rpm-publisher.service"
 ```
 
 ### View Service Logs
 
-```bash
+```powershell
 ssh admin@<internal-ip> "journalctl --user -M rpmops@ -u airgap-rpm-publisher.service -n 50"
 ```
 
@@ -52,13 +81,20 @@ ssh admin@<internal-ip> "journalctl --user -M rpmops@ -u airgap-rpm-publisher.se
 
 ### Run Onboarding Playbook
 
-```bash
-make ansible-onboard INVENTORY=ansible/inventories/lab.yml
+From PowerShell with Ansible available (via WSL or remote):
+
+```powershell
+# Using Makefile (requires bash/WSL)
+wsl make ansible-onboard INVENTORY=ansible/inventories/lab.yml
+
+# Or run Ansible directly from WSL
+wsl -e bash -c "cd ansible && ansible-playbook -i inventories/lab.yml playbooks/onboard_hosts.yml"
 ```
 
-To limit to specific hosts, run the playbook directly:
-```bash
-cd ansible && ansible-playbook -i inventories/lab.yml playbooks/onboard_hosts.yml --limit new-host
+Alternatively, SSH to a management host with Ansible installed:
+
+```powershell
+ssh admin@<management-host> "cd /srv/airgap/ansible && ansible-playbook -i inventories/lab.yml playbooks/onboard_hosts.yml"
 ```
 
 ### Onboarding Tags
@@ -76,8 +112,15 @@ cd ansible && ansible-playbook -i inventories/lab.yml playbooks/onboard_hosts.ym
 
 ## Manifest Collection
 
-```bash
-make manifests INVENTORY=ansible/inventories/lab.yml
+```powershell
+# From WSL or management host
+wsl make manifests INVENTORY=ansible/inventories/lab.yml
+```
+
+Or directly via SSH:
+
+```powershell
+ssh admin@<internal-ip> "cd /srv/airgap/ansible && ansible-playbook -i inventories/lab.yml playbooks/collect_manifests.yml"
 ```
 
 ---
@@ -88,39 +131,44 @@ make manifests INVENTORY=ansible/inventories/lab.yml
 
 | Environment | Path | Purpose |
 |-------------|------|---------|
-| testing | `/var/lib/airgap-rpm/repo/testing/` | Newly imported packages |
-| stable | `/var/lib/airgap-rpm/repo/stable/` | Production-ready packages |
+| testing | `/srv/airgap/data/lifecycle/testing/` | Newly imported packages |
+| stable | `/srv/airgap/data/lifecycle/stable/` | Production-ready packages |
 
 ### Sync Repositories (External Server)
 
-```bash
+```powershell
 ssh admin@<external-ip> "sudo /opt/airgap-rpm/scripts/external/sync_repos.sh"
 ```
 
 ### Export Bundle for Hand-Carry
 
-```bash
+```powershell
 ssh admin@<external-ip> "sudo /opt/airgap-rpm/scripts/external/export_bundle.sh"
 ```
 
 ### Import Bundle (Internal Server)
 
-```bash
-make import BUNDLE_PATH=/var/lib/airgap-rpm/import/bundle-YYYYMMDD.tar.gz
+```powershell
+# Copy bundle to internal server
+scp /path/to/bundle-YYYYMMDD.tar.gz admin@<internal-ip>:/srv/airgap/data/import/
+
+# Import the bundle
+ssh admin@<internal-ip> "sudo /opt/airgap-rpm/scripts/internal/import_bundle.sh /srv/airgap/data/import/bundle-YYYYMMDD.tar.gz"
 ```
 
 ### Promote from Testing to Stable
 
-```bash
-make promote FROM=testing TO=stable
+```powershell
+ssh admin@<internal-ip> "sudo /opt/airgap-rpm/scripts/internal/promote_lifecycle.sh testing stable"
 ```
 
 ---
 
 ## Monthly Patch Cycle
 
-```bash
-make patch INVENTORY=ansible/inventories/lab.yml
+```powershell
+# Run from WSL or management host
+wsl make patch INVENTORY=ansible/inventories/lab.yml
 ```
 
 ---
@@ -129,16 +177,23 @@ make patch INVENTORY=ansible/inventories/lab.yml
 
 ### Check Certificate Expiration
 
-```bash
-ssh admin@<internal-ip> "openssl x509 -in /var/lib/airgap-rpm/tls/server.crt -noout -dates"
+```powershell
+ssh admin@<internal-ip> "openssl x509 -in /srv/airgap/certs/server.crt -noout -dates"
 ```
 
 ### Replace TLS Certificate
 
-```bash
-ansible-playbook -i ansible/inventories/lab.yml ansible/playbooks/replace_repo_tls_cert.yml \
-  -e "cert_path=/tmp/new-certs/server.crt" \
-  -e "key_path=/tmp/new-certs/server.key"
+1. Copy new certificates to the server:
+
+```powershell
+scp new-server.crt admin@<internal-ip>:/tmp/
+scp new-server.key admin@<internal-ip>:/tmp/
+```
+
+2. Run the replacement playbook:
+
+```powershell
+ssh admin@<management-host> "cd /srv/airgap/ansible && ansible-playbook -i inventories/lab.yml playbooks/replace_repo_tls_cert.yml -e 'cert_path=/tmp/new-server.crt key_path=/tmp/new-server.key'"
 ```
 
 ---
@@ -147,16 +202,51 @@ ansible-playbook -i ansible/inventories/lab.yml ansible/playbooks/replace_repo_t
 
 ### Backup Repository Content
 
-```bash
-ssh admin@<internal-ip> "sudo tar -czf /var/lib/airgap-rpm/backups/repo-$(date +%Y%m%d).tar.gz -C /var/lib/airgap-rpm repo/"
+```powershell
+ssh admin@<internal-ip> "sudo tar -czf /srv/airgap/backups/repo-$(date +%Y%m%d).tar.gz -C /srv/airgap data/"
 ```
 
 ### Restore from Backup
 
-1. Stop service
-2. Extract backup to `/var/lib/airgap-rpm/`
-3. Fix ownership: `chown -R rpmops:rpmops /var/lib/airgap-rpm/repo/`
-4. Start service
+1. Stop service:
+   ```powershell
+   ssh admin@<internal-ip> "systemctl --user -M rpmops@ stop airgap-rpm-publisher.service"
+   ```
+
+2. Extract backup:
+   ```powershell
+   ssh admin@<internal-ip> "sudo tar -xzf /srv/airgap/backups/repo-YYYYMMDD.tar.gz -C /srv/airgap"
+   ```
+
+3. Fix ownership:
+   ```powershell
+   ssh admin@<internal-ip> "sudo chown -R rpmops:rpmops /srv/airgap/data/"
+   ```
+
+4. Start service:
+   ```powershell
+   ssh admin@<internal-ip> "systemctl --user -M rpmops@ start airgap-rpm-publisher.service"
+   ```
+
+---
+
+## Server Management
+
+### Destroy Servers
+
+> **WARNING**: This permanently deletes all VMs and data.
+
+```powershell
+.\scripts\operator.ps1 destroy-servers
+```
+
+### Build OVA Appliances
+
+Export running VMs as OVA templates:
+
+```powershell
+.\scripts\operator.ps1 build-ovas
+```
 
 ---
 
@@ -164,36 +254,116 @@ ssh admin@<internal-ip> "sudo tar -czf /var/lib/airgap-rpm/backups/repo-$(date +
 
 ### Remove Managed Host
 
-1. Collect final manifest
-2. Remove from inventory
-3. Optionally restore original repo configuration
+1. Collect final manifest:
+   ```powershell
+   ssh admin@<internal-ip> "cd /srv/airgap/ansible && ansible-playbook -i inventories/lab.yml playbooks/collect_manifests.yml --limit <host>"
+   ```
+
+2. Remove from inventory file
+
+3. Optionally restore original repo configuration on the host
 
 ### Decommission Server
 
-1. Backup repository and certificates
-2. Stop and disable services
-3. Remove from vSphere: `make servers-destroy`
+1. Backup repository and certificates:
+   ```powershell
+   ssh admin@<internal-ip> "sudo tar -czf /srv/airgap/final-backup.tar.gz -C /srv/airgap data/ certs/"
+   scp admin@<internal-ip>:/srv/airgap/final-backup.tar.gz ./
+   ```
+
+2. Destroy VMs:
+   ```powershell
+   .\scripts\operator.ps1 destroy-servers -Force
+   ```
 
 ---
 
 ## Troubleshooting Reference
 
 ### Repository Service Won't Start
-- Check logs: `journalctl --user -M rpmops@ -u airgap-rpm-publisher.service`
-- Verify TLS certificate validity
-- Check port conflicts: `ss -tlnp | grep -E ':80|:443'`
+
+```powershell
+# Check logs
+ssh admin@<internal-ip> "journalctl --user -M rpmops@ -u airgap-rpm-publisher.service -n 100"
+
+# Verify TLS certificate validity
+ssh admin@<internal-ip> "openssl x509 -in /srv/airgap/certs/server.crt -noout -checkend 0"
+
+# Check port conflicts
+ssh admin@<internal-ip> "ss -tlnp | grep -E ':8080|:8443'"
+```
 
 ### Managed Host Cannot Access Repository
-- Check firewall on internal server
-- Verify repository URL in `/etc/yum.repos.d/airgap-*.repo`
-- Test with: `curl -vk https://<internal-ip>/repo/stable/`
+
+```powershell
+# Check firewall on internal server
+ssh admin@<internal-ip> "sudo firewall-cmd --list-ports"
+
+# Verify repository URL in client config
+ssh admin@<managed-host> "cat /etc/yum.repos.d/airgap-*.repo"
+
+# Test connectivity
+ssh admin@<managed-host> "curl -vk https://<internal-ip>:8443/repo/stable/"
+```
 
 ### Package Import Fails
-- Verify bundle structure (BILL_OF_MATERIALS.json exists)
-- Check disk space: `df -h /var/lib/airgap-rpm`
-- Review import log
+
+```powershell
+# Verify bundle structure
+ssh admin@<internal-ip> "tar -tzf /srv/airgap/data/import/bundle.tar.gz | head -20"
+
+# Check disk space
+ssh admin@<internal-ip> "df -h /srv/airgap"
+
+# Review import log
+ssh admin@<internal-ip> "cat /var/log/airgap-import.log"
+```
 
 ### Ansible Playbook Fails
-- Run with `-vvv` for verbose output
-- Check SSH connectivity
-- Verify Python interpreter path in inventory
+
+```powershell
+# Run with verbose output
+ssh admin@<management-host> "cd /srv/airgap/ansible && ansible-playbook -i inventories/lab.yml playbooks/onboard_hosts.yml -vvv"
+
+# Check SSH connectivity
+ssh admin@<managed-host> "echo 'SSH OK'"
+
+# Verify Python interpreter
+ssh admin@<managed-host> "python3 --version"
+```
+
+### Validate System Configuration
+
+```powershell
+# Validate spec.yaml
+.\scripts\operator.ps1 validate-spec
+
+# Validate operator guides
+.\scripts\operator.ps1 guide-validate
+
+# Run full E2E tests
+.\scripts\operator.ps1 e2e
+```
+
+---
+
+## Appendix: Linux/macOS Administration
+
+For administrators using Linux or macOS, all operations can be performed using:
+
+1. **PowerShell Core**: Install and use the same `operator.ps1` commands
+2. **Makefile targets**: Use `make` commands as an alternative
+3. **Direct SSH**: All remote operations work identically
+
+### Example: Using Makefile on Linux
+
+```bash
+# Validate configuration
+make validate-spec
+
+# Run E2E tests
+make e2e
+
+# Validate guides
+make guide-validate
+```
