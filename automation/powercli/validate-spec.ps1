@@ -96,7 +96,7 @@ function Test-Required {
     $value = Get-ConfigValue -Path $Path
 
     if ([string]::IsNullOrWhiteSpace($value)) {
-        $script:Errors += "$Path: $Description is required"
+        $script:Errors += "${Path}: $Description is required"
         Write-Missing $Path
         return $false
     } else {
@@ -115,7 +115,7 @@ function Test-Optional {
     $value = Get-ConfigValue -Path $Path
 
     if ([string]::IsNullOrWhiteSpace($value)) {
-        $script:Warnings += "$Path: $Description (using default)"
+        $script:Warnings += "${Path}: $Description (using default)"
         Write-Default $Path
     } else {
         Write-OK $Path
