@@ -117,3 +117,6 @@ temp/
 output/
 *.rpm
 !tests/fixtures/**/*.rpm
+
+# Keep PowerCLI lib directory
+!automation/powercli/lib/
