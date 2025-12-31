@@ -1,0 +1,20 @@
+=== PHASE 4: BUILD THE BUNDLE (tar format) ===
+Timestamp: 2025-12-31T06:23:20Z
+
+NOTE: zip/unzip not available. Using tar.gz format for validation.
+
+Created: dist/airgapped-deps.tar.gz
+-rw-rw-r-- 1 claude claude 5424 Dec 31 06:23 dist/airgapped-deps.tar.gz
+
+Archive contents:
+drwxrwxr-x claude/claude     0 2025-12-31 06:23 airgapped-deps/
+drwxrwxr-x claude/claude     0 2025-12-31 06:23 airgapped-deps/powercli/
+drwxrwxr-x claude/claude     0 2025-12-31 06:23 airgapped-deps/powercli/offline-repo/
+-rw-rw-r-- claude/claude    36 2025-12-31 06:23 airgapped-deps/powercli/offline-repo/VMware.PowerCLI.psd1
+drwxrwxr-x claude/claude     0 2025-12-31 06:23 airgapped-deps/checksums/
+-rw-rw-r-- claude/claude   276 2025-12-31 06:23 airgapped-deps/checksums/sha256.txt
+-rw------- claude/claude  2318 2025-12-31 06:23 airgapped-deps/checksums/verify.ps1
+-rw------- claude/claude  2628 2025-12-31 06:23 airgapped-deps/README.md
+drwxrwxr-x claude/claude     0 2025-12-31 06:23 airgapped-deps/powershell/
+-rw-rw-r-- claude/claude 102400 2025-12-31 06:23 airgapped-deps/powershell/PowerShell-7.4.6-win-x64.msi
+-rw------- claude/claude   7481 2025-12-31 06:23 airgapped-deps/install-deps.ps1

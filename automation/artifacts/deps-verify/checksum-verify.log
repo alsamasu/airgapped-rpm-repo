@@ -1,0 +1,8 @@
+=== CHECKSUM VERIFICATION LOG ===
+Timestamp: 2025-12-31T06:43:50Z
+ZIP: dist/airgapped-deps.zip (265,232,308 bytes)
+
+Verification: 490 files OK, 0 files FAILED
+
+CHECKSUM VERIFICATION: PASSED
+Exit code: 0

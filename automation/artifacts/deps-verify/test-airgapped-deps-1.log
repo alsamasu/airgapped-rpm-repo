@@ -1,0 +1,27 @@
+=== PHASE 3: TEST EXECUTION ===
+Timestamp: 2025-12-31T06:22:25Z
+
+NOTE: pwsh not available in this Linux environment.
+Performing equivalent structural validation using bash.
+
+=== Test 1: Structure Validation ===
+
+Checking required files:
+  [OK] install-deps.ps1
+  [OK] README.md
+  [OK] checksums/verify.ps1
+  [OK] checksums/sha256.txt
+
+Checking required directories:
+  [OK] powershell/
+  [OK] powercli/
+  [OK] checksums/
+
+Validating PowerShell syntax (basic check):
+  [OK] airgapped-deps/install-deps.ps1 - has valid PowerShell structure
+  [OK] airgapped-deps/checksums/verify.ps1 - has valid PowerShell structure
+
+Checking for forbidden tool USAGE (not docs):
+  [OK] No forbidden tool usage
+
+Structure test: PASSED

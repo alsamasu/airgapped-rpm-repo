@@ -1,0 +1,9 @@
+=== PHASE 5b: INSTALL-DEPS DRY RUN CHECK ===
+Timestamp: 2025-12-31T06:24:07Z
+
+Checking install-deps.ps1 for -WhatIf support:
+
+STATUS: No -WhatIf or -CheckOnly mode found.
+
+RECOMMENDATION: Add -WhatIf parameter to install-deps.ps1 for non-destructive validation.
+This would allow operators to verify the bundle before actual installation.

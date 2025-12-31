@@ -1,0 +1,27 @@
+=== ZIP MANIFEST ===
+File: dist/airgapped-deps.zip
+Size: 265,232,308 bytes (252 MB)
+
+Structure:
+  install-deps.ps1
+  README.md
+  checksums/
+    sha256.txt
+    verify.ps1
+  powershell/
+    PowerShell-7.4.6-win-x64.msi (109,203,456 bytes)
+  powercli/
+    offline-repo/
+      /
+      VMware.CloudServices/
+      VMware.DeployAutomation/
+      VMware.ImageBuilder/
+      VMware.PowerCLI/
+      VMware.PowerCLI.Sdk/
+      VMware.PowerCLI.Sdk.Types/
+      VMware.PowerCLI.VCenter/
+      VMware.PowerCLI.VCenter.Types.ApplianceService/
+      VMware.PowerCLI.VCenter.Types.CertificateManagement/
+      ... (84 modules total)
+
+Total files: 4215

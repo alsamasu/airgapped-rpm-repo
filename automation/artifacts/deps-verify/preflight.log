@@ -1,0 +1,179 @@
+=== PHASE 1: PREFLIGHT FILE PRESENCE CHECK ===
+Timestamp: 2025-12-31T06:20:45Z
+
+=== scripts/build-airgapped-deps.ps1 ===
+EXISTS: YES
+SIZE: 15225 bytes
+FIRST 20 LINES:
+<#
+.SYNOPSIS
+    Build airgapped-deps.zip for offline Windows 11 operator installation.
+
+.DESCRIPTION
+    This script runs on an INTERNET-CONNECTED Windows machine to download
+    and package all dependencies required for air-gapped operator deployment.
+
+    Downloads:
+    - PowerShell 7.x MSI installer
+    - VMware.PowerCLI module and all dependencies
+
+    Produces:
+    - airgapped-deps.zip ready for hand-carry to air-gapped environment
+
+.NOTES
+    FORBIDDEN TOOLS (must NOT be included):
+    - Git
+    - Python
+    - powershell-yaml
+
+=== airgapped-deps/install-deps.ps1 ===
+EXISTS: YES
+SIZE: 7481 bytes
+FIRST 20 LINES:
+<#
+.SYNOPSIS
+    Install airgapped dependencies on Windows 11 operator laptop.
+
+.DESCRIPTION
+    Offline installer for PowerShell 7 and VMware.PowerCLI.
+    Runs without internet access using pre-packaged dependencies.
+
+    FORBIDDEN TOOLS (will NOT be installed):
+    - Git
+    - Python
+    - powershell-yaml
+    - Windows ADK / WinPE
+    - WSL
+    - GNU Make
+
+.NOTES
+    Must be run as Administrator for PowerShell MSI installation.
+    All actions are logged to install.log in the script directory.
+
+
+=== airgapped-deps/checksums/verify.ps1 ===
+EXISTS: YES
+SIZE: 2318 bytes
+FIRST 20 LINES:
+<#
+.SYNOPSIS
+    Verify checksums of airgapped-deps contents.
+
+.DESCRIPTION
+    Validates all files against sha256.txt before installation.
+    This script must be run from the airgapped-deps root directory.
+
+.PARAMETER BasePath
+    Base path to verify files from. Defaults to parent directory of checksums folder.
+
+.EXAMPLE
+    .\verify.ps1
+
+.EXAMPLE
+    .\verify.ps1 -BasePath C:\src\airgapped-deps
+#>
+
+#Requires -Version 5.1
+
+
+=== airgapped-deps/README.md ===
+EXISTS: YES
+SIZE: 2628 bytes
+FIRST 20 LINES:
+# Airgapped Dependencies for Windows 11 Operator
+
+This package contains all dependencies required to run the airgapped RPM
+repository operator workflow on a Windows 11 laptop WITHOUT internet access.
+
+## Contents
+
+- `powershell/` - PowerShell 7.x MSI installer
+- `powercli/` - VMware.PowerCLI module and dependencies
+- `checksums/` - SHA256 verification files
+- `install-deps.ps1` - Offline installer script
+
+## IMPORTANT: Forbidden Tools
+
+The following tools are NOT included and MUST NOT be installed:
+
+- **Git** - Not required; use ZIP-based delivery
+- **Python** - Not required; all scripts are PowerShell
+- **powershell-yaml** - Not required; native PowerShell YAML parsing
+- **Windows ADK / WinPE** - Not required for operator workflow
+
+=== tests/airgapped-deps/* ===
+--- tests/airgapped-deps/README.md ---
+EXISTS: YES
+SIZE: 1271 bytes
+FIRST 20 LINES:
+# Airgapped-Deps Tests
+
+Validation tests for the air-gapped dependencies workflow.
+
+## Tests
+
+| Test | Description |
+|------|-------------|
+| `test-structure.ps1` | Validates airgapped-deps/ directory structure and scripts |
+| `test-build-script.ps1` | Validates scripts/build-airgapped-deps.ps1 |
+
+## Running Tests
+
+### On Windows (PowerShell 5.1+)
+
+```powershell
+# Run all tests
+.\test-structure.ps1
+.\test-build-script.ps1
+```
+
+--- tests/airgapped-deps/test-build-script.ps1 ---
+EXISTS: YES
+SIZE: 4775 bytes
+FIRST 20 LINES:
+<#
+.SYNOPSIS
+    Validate build-airgapped-deps.ps1 script.
+
+.DESCRIPTION
+    Tests the online builder script for:
+    - Valid PowerShell syntax
+    - Required parameters
+    - No forbidden tool references
+    - Correct output structure
+
+.EXAMPLE
+    .\test-build-script.ps1
+#>
+
+#Requires -Version 5.1
+
+[CmdletBinding()]
+param(
+    [string]$ScriptPath = (Join-Path $PSScriptRoot "../../scripts/build-airgapped-deps.ps1")
+
+--- tests/airgapped-deps/test-structure.ps1 ---
+EXISTS: YES
+SIZE: 5397 bytes
+FIRST 20 LINES:
+<#
+.SYNOPSIS
+    Validate airgapped-deps structure and scripts.
+
+.DESCRIPTION
+    Tests that all required files exist and are properly formatted.
+    Does NOT test actual installation (that requires Windows).
+
+.EXAMPLE
+    .\test-structure.ps1
+#>
+
+#Requires -Version 5.1
+
+[CmdletBinding()]
+param(
+    [string]$BasePath = (Join-Path $PSScriptRoot "../../airgapped-deps")
+)
+
+$ErrorActionPreference = "Stop"
+
