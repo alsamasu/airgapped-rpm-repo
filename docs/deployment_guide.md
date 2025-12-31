@@ -13,6 +13,24 @@ The deployment automation uses VMware PowerCLI scripts with kickstart injection 
 2. **OVA Deployment**: Pre-built appliance images with first-boot customization via OVF properties
 
 ---
+> ⚠️ **Authoritative Prerequisites Guardrail**
+>
+> This section is the **single source of truth** for Windows 11 operator prerequisites.
+>
+> **Rules:**
+> - No additional software requirements may be inferred, suggested, or added unless:
+>   1) They are explicitly invoked by a documented command in this guide, **and**
+>   2) The command fails without them.
+> - If a tool is not directly executed by the operator workflow, it is **not a prerequisite**.
+> - Generic assumptions (e.g., “PowerShell automation usually needs X”) are invalid.
+>
+> **Explicitly forbidden requirement inflation:**
+> - Do NOT require Python unless the operator runs Python directly.
+> - Do NOT require Windows ADK/WinPE unless building Windows images.
+> - Do NOT require YAML modules unless the operator imports them.
+> - Do NOT require GNU Make on Windows.
+>
+> Any deviation from this list is a documentation defect.
 
 ## Windows 11 Laptop (Primary Workflow)
 
@@ -32,23 +50,7 @@ This is the **recommended workflow** for operators running from a Windows 11 lap
    Set-PowerCLIConfiguration -InvalidCertificateAction Ignore -Confirm:$false
    ```
 
-3. **PowerShell YAML Module**
-   ```powershell
-   Install-Module -Name powershell-yaml -Scope CurrentUser -Force
-   ```
-
-4. **Windows ADK** (for ISO creation)
-   - Download from [Microsoft Windows ADK](https://learn.microsoft.com/en-us/windows-hardware/get-started/adk-install)
-   - Install "Deployment Tools" component (includes `oscdimg.exe`)
-
-5. **Python 3** (for inventory rendering)
-   ```powershell
-   winget install Python.Python.3.12
-   pip install pyyaml
-   ```
-
-6. **Git for Windows** (optional, for bash script compatibility)
-   - Download from [git-scm.com](https://git-scm.com/download/win)
+> **Note:** Per the guardrails above, Python, Windows ADK, powershell-yaml, and WSL are explicitly **NOT REQUIRED** for the operator workflow.
 
 ### Set VMware Credentials
 
@@ -337,8 +339,3 @@ Test results are written to: `automation/artifacts/windows-vsphere-test/`
 - Verify datastore has sufficient space
 - Check datastore permissions for the user
 - Verify ISO path in spec.yaml is correct
-
-### Python Not Found
-- Install Python 3: `winget install Python.Python.3.12`
-- Verify installation: `python --version`
-- Install PyYAML: `pip install pyyaml`

@@ -1,4 +1,23 @@
 <#
+OPERATOR ENVIRONMENT GUARDRail
+
+This script is designed to run on a Windows 11 laptop with the MINIMUM required tooling.
+
+This script MUST NOT:
+- Assume Python is installed
+- Assume GNU Make exists
+- Assume powershell-yaml is available
+- Assume Windows ADK/WinPE is installed
+- Install software without explicit operator instruction
+
+If a dependency is missing:
+- Fail fast
+- Emit a clear error explaining WHICH operation requires it
+- Do NOT suggest unrelated tooling
+
+This guardrail is intentional to prevent dependency creep.
+#>
+<#
 .SYNOPSIS
     Airgapped RPM Repository - Windows Operator Entrypoint
 
@@ -53,7 +72,7 @@
     .\operator.ps1 e2e -KeepVMs
 
 .NOTES
-    Requires: PowerShell 7+, VMware PowerCLI, powershell-yaml module
+    Requires: PowerShell 7+, VMware PowerCLI
     Configuration: config/spec.yaml
     Artifacts: automation/artifacts/operator/
 #>
@@ -206,9 +225,8 @@ ENVIRONMENT VARIABLES:
 PREREQUISITES:
     - PowerShell 7.0 or later
     - VMware PowerCLI module: Install-Module VMware.PowerCLI -Scope CurrentUser
-    - powershell-yaml module: Install-Module powershell-yaml -Scope CurrentUser
-    - Windows ADK (for ISO creation): oscdimg.exe
-    - Python 3 with PyYAML (for inventory rendering)
+
+    NOT REQUIRED: Python, Windows ADK, powershell-yaml, GNU Make, WSL
 
 "@ -ForegroundColor White
 }
@@ -225,14 +243,7 @@ function Test-Prerequisites {
         Write-Log "PowerShell $($PSVersionTable.PSVersion) - OK" -Level SUCCESS
     }
 
-    # powershell-yaml module
-    if (-not (Get-Module -ListAvailable -Name powershell-yaml)) {
-        $issues += "powershell-yaml module not found. Install: Install-Module powershell-yaml -Scope CurrentUser"
-    } else {
-        Write-Log "powershell-yaml module - OK" -Level SUCCESS
-    }
-
-    # VMware PowerCLI (optional for some commands)
+    # VMware PowerCLI (required for VMware operations)
     $powerCLI = Get-Module -ListAvailable -Name VMware.PowerCLI
     if ($powerCLI) {
         Write-Log "VMware PowerCLI $($powerCLI.Version) - OK" -Level SUCCESS
@@ -240,16 +251,7 @@ function Test-Prerequisites {
         Write-Log "VMware PowerCLI not found (required for VMware operations)" -Level WARN
     }
 
-    # Python (for inventory rendering)
-    $python = Get-Command python3 -ErrorAction SilentlyContinue
-    if (-not $python) {
-        $python = Get-Command python -ErrorAction SilentlyContinue
-    }
-    if ($python) {
-        Write-Log "Python found: $($python.Source) - OK" -Level SUCCESS
-    } else {
-        Write-Log "Python not found (required for inventory rendering)" -Level WARN
-    }
+    # Per guardrails: Do NOT check for Python, powershell-yaml, Windows ADK, or WSL
 
     if ($issues.Count -gt 0) {
         Write-Log "Prerequisites check failed:" -Level ERROR
@@ -400,47 +402,13 @@ function Invoke-ValidateSpec {
             return Complete-OperatorRun -Success $false
         }
     } else {
-        # Fallback: basic YAML validation
-        Write-Log "Using basic YAML validation (PowerCLI script not found)" -Level WARN
-
-        try {
-            Import-Module powershell-yaml -ErrorAction Stop
-            $yaml = Get-Content $SpecPath -Raw | ConvertFrom-Yaml
-
-            # Check required fields
-            $required = @("vcenter.server", "vcenter.datastore", "vm_names.rpm_external", "vm_names.rpm_internal")
-            $missing = @()
-
-            foreach ($field in $required) {
-                $parts = $field -split '\.'
-                $value = $yaml
-                foreach ($part in $parts) {
-                    if ($value -and $value.ContainsKey($part)) {
-                        $value = $value[$part]
-                    } else {
-                        $value = $null
-                        break
-                    }
-                }
-                if ([string]::IsNullOrWhiteSpace($value)) {
-                    $missing += $field
-                }
-            }
-
-            if ($missing.Count -gt 0) {
-                Write-Log "Missing required fields:" -Level ERROR
-                foreach ($m in $missing) {
-                    Write-Log "  - $m" -Level ERROR
-                }
-                return Complete-OperatorRun -Success $false -Results @{ missing_fields = $missing }
-            }
-
-            Write-Log "Spec validation passed" -Level SUCCESS
-            return Complete-OperatorRun -Success $true -Results @{ validation = "passed" }
-
-        } catch {
-            Write-Log "YAML parse error: $_" -Level ERROR
-            return Complete-OperatorRun -Success $false
+        # Validation script not found - cannot validate without it
+        # Per guardrails: Do NOT require powershell-yaml module
+        Write-Log "Validation script not found: $validateScript" -Level ERROR
+        Write-Log "Spec file exists but cannot be validated without automation/powercli/validate-spec.ps1" -Level ERROR
+        return Complete-OperatorRun -Success $false -Results @{
+            validation = "skipped"
+            reason = "validate-spec.ps1 script not found"
         }
     }
 }

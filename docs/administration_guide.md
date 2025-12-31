@@ -81,21 +81,13 @@ ssh admin@<internal-ip> "journalctl --user -M rpmops@ -u airgap-rpm-publisher.se
 
 ### Run Onboarding Playbook
 
-From PowerShell with Ansible available (via WSL or remote):
-
-```powershell
-# Using Makefile (requires bash/WSL)
-wsl make ansible-onboard INVENTORY=ansible/inventories/lab.yml
-
-# Or run Ansible directly from WSL
-wsl -e bash -c "cd ansible && ansible-playbook -i inventories/lab.yml playbooks/onboard_hosts.yml"
-```
-
-Alternatively, SSH to a management host with Ansible installed:
+SSH to a management host (or the internal server) with Ansible installed:
 
 ```powershell
 ssh admin@<management-host> "cd /srv/airgap/ansible && ansible-playbook -i inventories/lab.yml playbooks/onboard_hosts.yml"
 ```
+
+> **Note:** Per guardrails, WSL is NOT REQUIRED on the Windows 11 operator laptop. Use SSH to run Ansible commands on the internal server or a dedicated management host.
 
 ### Onboarding Tags
 
@@ -111,13 +103,6 @@ ssh admin@<management-host> "cd /srv/airgap/ansible && ansible-playbook -i inven
 ---
 
 ## Manifest Collection
-
-```powershell
-# From WSL or management host
-wsl make manifests INVENTORY=ansible/inventories/lab.yml
-```
-
-Or directly via SSH:
 
 ```powershell
 ssh admin@<internal-ip> "cd /srv/airgap/ansible && ansible-playbook -i inventories/lab.yml playbooks/collect_manifests.yml"
@@ -167,8 +152,8 @@ ssh admin@<internal-ip> "sudo /opt/airgap-rpm/scripts/internal/promote_lifecycle
 ## Monthly Patch Cycle
 
 ```powershell
-# Run from WSL or management host
-wsl make patch INVENTORY=ansible/inventories/lab.yml
+# Run from management host via SSH
+ssh admin@<management-host> "cd /srv/airgap/ansible && ansible-playbook -i inventories/lab.yml playbooks/patch_hosts.yml"
 ```
 
 ---
