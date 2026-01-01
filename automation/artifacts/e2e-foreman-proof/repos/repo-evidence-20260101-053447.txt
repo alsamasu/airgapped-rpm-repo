@@ -1,0 +1,161 @@
+---|-------------------------------------------------------------|-------------
+ID | NAME                                                        | CONTENT TYPE
+---|-------------------------------------------------------------|-------------
+9  | Red Hat Enterprise Linux 8 for x86_64 - AppStream RPMs 8.10 | yum         
+8  | Red Hat Enterprise Linux 8 for x86_64 - BaseOS RPMs 8.10    | yum         
+11 | Red Hat Enterprise Linux 9 for x86_64 - AppStream RPMs 9.6  | yum         
+10 | Red Hat Enterprise Linux 9 for x86_64 - BaseOS RPMs 9.6     | yum         
+---|-------------------------------------------------------------|-------------
+
+=== Repo ID $id ===
+Id:                        8
+Name:                      Red Hat Enterprise Linux 8 for x86_64 - BaseOS RPMs 8.10
+Label:                     Red_Hat_Enterprise_Linux_8_for_x86_64_-_BaseOS_RPMs_8_10
+Description:               
+Organization:              Default Organization
+Red Hat Repository:        yes
+Content Type:              yum
+Content Label:             rhel-8-for-x86_64-baseos-rpms
+Mirroring Policy:          Complete Mirroring
+Url:                       https://cdn.redhat.com/content/dist/rhel8/8.10/x86_64/baseos/os
+Publish Via HTTP:          no
+Published At:              https://satellite.local/pulp/content/Default_Organization/Library/content/dist/rhel8/8.10/x86_64/baseos/os/
+Relative Path:             Default_Organization/Library/content/dist/rhel8/8.10/x86_64/baseos/os
+Download Policy:           immediate
+Container Repository Name: default_organization-red_hat_enterprise_linux_for_x86_64-red_hat_enterprise_linux_8_for_x86_64_baseos_rpms_8_10
+Publish Settings:          
+    Restrict to architecture: No restriction
+    Restrict to OS Version:   No restriction
+HTTP Proxy:                
+    HTTP Proxy Policy: global_default_http_proxy
+Product:                   
+    Id:   74
+    Name: Red Hat Enterprise Linux for x86_64
+GPG Key:                   
+
+Sync:                      
+    Status:         Success
+    Last Sync Date: about 2 hours
+Created:                   2025/12/31 22:48:29
+Updated:                   2025/12/31 22:49:30
+Content Counts:            
+    Packages:       21996
+    SRPMs:          0
+    Module Streams: 0
+    Package Groups: 35
+    Errata:         2377
+
+=== Repo ID $id ===
+Id:                        9
+Name:                      Red Hat Enterprise Linux 8 for x86_64 - AppStream RPMs 8.10
+Label:                     Red_Hat_Enterprise_Linux_8_for_x86_64_-_AppStream_RPMs_8_10
+Description:               
+Organization:              Default Organization
+Red Hat Repository:        yes
+Content Type:              yum
+Content Label:             rhel-8-for-x86_64-appstream-rpms
+Mirroring Policy:          Complete Mirroring
+Url:                       https://cdn.redhat.com/content/dist/rhel8/8.10/x86_64/appstream/os
+Publish Via HTTP:          no
+Published At:              https://satellite.local/pulp/content/Default_Organization/Library/content/dist/rhel8/8.10/x86_64/appstream/os/
+Relative Path:             Default_Organization/Library/content/dist/rhel8/8.10/x86_64/appstream/os
+Download Policy:           immediate
+Container Repository Name: default_organization-red_hat_enterprise_linux_for_x86_64-red_hat_enterprise_linux_8_for_x86_64_appstream_rpms_8_10
+Publish Settings:          
+    Restrict to architecture: No restriction
+    Restrict to OS Version:   No restriction
+HTTP Proxy:                
+    HTTP Proxy Policy: global_default_http_proxy
+Product:                   
+    Id:   74
+    Name: Red Hat Enterprise Linux for x86_64
+GPG Key:                   
+
+Sync:                      
+    Status:         Success
+    Last Sync Date: 41 minutes
+Created:                   2025/12/31 22:48:40
+Updated:                   2025/12/31 22:49:38
+Content Counts:            
+    Packages:       44067
+    SRPMs:          0
+    Module Streams: 981
+    Package Groups: 59
+    Errata:         4429
+
+=== Repo ID $id ===
+Id:                        10
+Name:                      Red Hat Enterprise Linux 9 for x86_64 - BaseOS RPMs 9.6
+Label:                     Red_Hat_Enterprise_Linux_9_for_x86_64_-_BaseOS_RPMs_9_6
+Description:               
+Organization:              Default Organization
+Red Hat Repository:        yes
+Content Type:              yum
+Content Label:             rhel-9-for-x86_64-baseos-rpms
+Mirroring Policy:          Complete Mirroring
+Url:                       https://cdn.redhat.com/content/dist/rhel9/9.6/x86_64/baseos/os
+Publish Via HTTP:          no
+Published At:              https://satellite.local/pulp/content/Default_Organization/Library/content/dist/rhel9/9.6/x86_64/baseos/os/
+Relative Path:             Default_Organization/Library/content/dist/rhel9/9.6/x86_64/baseos/os
+Download Policy:           immediate
+Container Repository Name: default_organization-red_hat_enterprise_linux_for_x86_64-red_hat_enterprise_linux_9_for_x86_64_baseos_rpms_9_6
+Publish Settings:          
+    Restrict to architecture: No restriction
+    Restrict to OS Version:   No restriction
+HTTP Proxy:                
+    HTTP Proxy Policy: global_default_http_proxy
+Product:                   
+    Id:   74
+    Name: Red Hat Enterprise Linux for x86_64
+GPG Key:                   
+
+Sync:                      
+    Status:         Success
+    Last Sync Date: 13 minutes
+Created:                   2025/12/31 22:48:50
+Updated:                   2025/12/31 22:49:44
+Content Counts:            
+    Packages:       11743
+    SRPMs:          0
+    Module Streams: 0
+    Package Groups: 34
+    Errata:         1685
+
+=== Repo ID $id ===
+Id:                        11
+Name:                      Red Hat Enterprise Linux 9 for x86_64 - AppStream RPMs 9.6
+Label:                     Red_Hat_Enterprise_Linux_9_for_x86_64_-_AppStream_RPMs_9_6
+Description:               
+Organization:              Default Organization
+Red Hat Repository:        yes
+Content Type:              yum
+Content Label:             rhel-9-for-x86_64-appstream-rpms
+Mirroring Policy:          Complete Mirroring
+Url:                       https://cdn.redhat.com/content/dist/rhel9/9.6/x86_64/appstream/os
+Publish Via HTTP:          no
+Published At:              https://satellite.local/pulp/content/Default_Organization/Library/content/dist/rhel9/9.6/x86_64/appstream/os/
+Relative Path:             Default_Organization/Library/content/dist/rhel9/9.6/x86_64/appstream/os
+Download Policy:           immediate
+Container Repository Name: default_organization-red_hat_enterprise_linux_for_x86_64-red_hat_enterprise_linux_9_for_x86_64_appstream_rpms_9_6
+Publish Settings:          
+    Restrict to architecture: No restriction
+    Restrict to OS Version:   No restriction
+HTTP Proxy:                
+    HTTP Proxy Policy: global_default_http_proxy
+Product:                   
+    Id:   74
+    Name: Red Hat Enterprise Linux for x86_64
+GPG Key:                   
+
+Sync:                      
+    Status:         Success
+    Last Sync Date: 12 minutes
+Created:                   2025/12/31 22:49:04
+Updated:                   2025/12/31 22:49:47
+Content Counts:            
+    Packages:       27663
+    SRPMs:          0
+    Module Streams: 97
+    Package Groups: 63
+    Errata:         5300
+

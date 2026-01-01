@@ -1,0 +1,58 @@
+=== E2E Foreman Proof - Final Status ===
+Generated: Thu Jan  1 06:22:05 UTC 2026
+
+=== Repository Summary ===
+---|-------------------------------------------------------------|-------------
+ID | NAME                                                        | CONTENT TYPE
+---|-------------------------------------------------------------|-------------
+9  | Red Hat Enterprise Linux 8 for x86_64 - AppStream RPMs 8.10 | yum         
+8  | Red Hat Enterprise Linux 8 for x86_64 - BaseOS RPMs 8.10    | yum         
+11 | Red Hat Enterprise Linux 9 for x86_64 - AppStream RPMs 9.6  | yum         
+10 | Red Hat Enterprise Linux 9 for x86_64 - BaseOS RPMs 9.6     | yum         
+---|-------------------------------------------------------------|-------------
+
+Name:                      Red Hat Enterprise Linux 8 for x86_64 - BaseOS RPMs 8.10
+Container Repository Name: default_organization-red_hat_enterprise_linux_for_x86_64-red_hat_enterprise_linux_8_for_x86_64_baseos_rpms_8_10
+    Name: Red Hat Enterprise Linux for x86_64
+    Status:         Success
+---
+Name:                      Red Hat Enterprise Linux 8 for x86_64 - AppStream RPMs 8.10
+Container Repository Name: default_organization-red_hat_enterprise_linux_for_x86_64-red_hat_enterprise_linux_8_for_x86_64_appstream_rpms_8_10
+    Name: Red Hat Enterprise Linux for x86_64
+    Status:         Success
+---
+Name:                      Red Hat Enterprise Linux 9 for x86_64 - BaseOS RPMs 9.6
+Container Repository Name: default_organization-red_hat_enterprise_linux_for_x86_64-red_hat_enterprise_linux_9_for_x86_64_baseos_rpms_9_6
+    Name: Red Hat Enterprise Linux for x86_64
+    Status:         Success
+---
+Name:                      Red Hat Enterprise Linux 9 for x86_64 - AppStream RPMs 9.6
+Container Repository Name: default_organization-red_hat_enterprise_linux_for_x86_64-red_hat_enterprise_linux_9_for_x86_64_appstream_rpms_9_6
+    Name: Red Hat Enterprise Linux for x86_64
+    Status:         Success
+---
+
+=== Content Views ===
+----------------|---------------------------|---------------------------|-----------|---------------------|---------------
+CONTENT VIEW ID | NAME                      | LABEL                     | COMPOSITE | LAST PUBLISHED      | REPOSITORY IDS
+----------------|---------------------------|---------------------------|-----------|---------------------|---------------
+3               | cv_rhel8_security         | RHEL8-CV                  | no        | 2026/01/01 05:35:24 | 8, 9          
+4               | cv_rhel9_security         | RHEL9-CV                  | no        | 2026/01/01 05:35:50 | 10, 11        
+1               | Default Organization View | Default_Organization_View | no        | 2025/12/31 20:56:22 |               
+----------------|---------------------------|---------------------------|-----------|---------------------|---------------
+
+=== Content View Versions ===
+---|-----------------------|---------|------------------------------------|-----------------------
+ID | NAME                  | VERSION | DESCRIPTION                        | LIFECYCLE ENVIRONMENTS
+---|-----------------------|---------|------------------------------------|-----------------------
+4  | cv_rhel8_security 1.0 | 1.0     | Security-only errata for RHEL 8.10 | Library               
+---|-----------------------|---------|------------------------------------|-----------------------
+---|-----------------------|---------|-----------------------------------|-----------------------
+ID | NAME                  | VERSION | DESCRIPTION                       | LIFECYCLE ENVIRONMENTS
+---|-----------------------|---------|-----------------------------------|-----------------------
+5  | cv_rhel9_security 1.0 | 1.0     | Security-only errata for RHEL 9.6 | Library               
+---|-----------------------|---------|-----------------------------------|-----------------------
+
+=== Disk Usage ===
+Filesystem                                                                 Size  Used Avail Use% Mounted on
+/dev/mapper/rhel_syn--2603--800c--1e00--56d0--0000--0000--0000--1d86-root  2.0T  476G  1.6T  24% /

@@ -1,0 +1,94 @@
+{
+  "e2e_proof": {
+    "date": "2026-01-01",
+    "duration_total": "~10 hours (including 5.5h vCenter outage)",
+    "status": "SUCCESS"
+  },
+  "infrastructure": {
+    "satellite_server": {
+      "ip": "192.168.1.119",
+      "version": "Foreman 3.11.5 + Katello 4.13.1",
+      "role": "External/connected content source"
+    },
+    "capsule_server": {
+      "ip": "192.168.1.249",
+      "version": "Foreman 3.11.5 + Katello 4.13.1",
+      "role": "Internal/disconnected content host",
+      "disk_expanded": "300GB -> 1TB (via vSphere)"
+    },
+    "rhel9_tester": {
+      "ip": "192.168.1.117",
+      "os": "RHEL 9.6"
+    },
+    "rhel8_tester": {
+      "ip": "192.168.1.87",
+      "os": "RHEL 8.10"
+    }
+  },
+  "content_views": {
+    "cv_rhel9_security": {
+      "version": "1.0",
+      "filter": "security-errata-only (Types: security)",
+      "repos": ["RHEL 9 BaseOS 9.6", "RHEL 9 AppStream 9.6"],
+      "packages": "~39K",
+      "export_size": "92GB",
+      "import_duration": "65 minutes"
+    },
+    "cv_rhel8_security": {
+      "version": "1.0",
+      "filter": "security-errata-only (Types: security)",
+      "repos": ["RHEL 8 BaseOS 8.10", "RHEL 8 AppStream 8.10"],
+      "packages": "~66K",
+      "export_size": "133GB",
+      "import_duration": "96 minutes"
+    }
+  },
+  "phases": {
+    "step_0_rehydrate": {
+      "status": "PASS",
+      "notes": "Capsule disk was 100% full, expanded via vSphere"
+    },
+    "phase_a_activation_keys": {
+      "status": "PASS",
+      "notes": "Keys already existed from prior setup"
+    },
+    "phase_b_export": {
+      "status": "PASS",
+      "notes": "Re-exported with --format importable to include metadata.json"
+    },
+    "phase_c_import": {
+      "status": "PASS",
+      "notes": "Required manual repo enable workaround for Katello bug, interrupted by 5.5h vCenter outage"
+    },
+    "phase_d_patch_verify": {
+      "status": "PASS",
+      "notes": "Both testers registered, patched, rebooted with new kernels"
+    }
+  },
+  "testers": {
+    "rhel9": {
+      "before": {
+        "packages": 694,
+        "kernel": "5.14.0-570.12.1.el9_6.x86_64"
+      },
+      "after": {
+        "packages": 700,
+        "kernel": "5.14.0-570.62.1.el9_6.x86_64"
+      },
+      "updates_applied": 135,
+      "reboot": "SUCCESS"
+    },
+    "rhel8": {
+      "before": {
+        "packages": 637,
+        "kernel": "4.18.0-553.el8_10.x86_64"
+      },
+      "after": {
+        "packages": 643,
+        "kernel": "4.18.0-553.89.1.el8_10.x86_64"
+      },
+      "updates_applied": "130+ (6 SSSD packages skipped due to missing samba-client-libs)",
+      "reboot": "SUCCESS"
+    }
+  }
+}
