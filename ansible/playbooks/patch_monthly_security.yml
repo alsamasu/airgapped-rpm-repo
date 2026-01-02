@@ -138,9 +138,88 @@
         dest: /var/log/patching/report-{{ ansible_date_time.date }}.txt
         mode: '0644'
         
+    # Extended post-verification (Satellite/Capsule requirements)
+    - name: Record current kernel version
+      ansible.builtin.command: uname -r
+      register: uname_result
+      changed_when: false
+
+    - name: Record OS release information
+      ansible.builtin.slurp:
+        src: /etc/os-release
+      register: os_release_content
+
+    - name: Check for remaining security advisories
+      ansible.builtin.command: dnf updateinfo list security
+      register: remaining_advisories
+      changed_when: false
+      failed_when: false
+
+    - name: Generate sorted package snapshot (post-patch)
+      ansible.builtin.shell: rpm -qa | sort > /var/log/patching/packages-sorted-post-$(date +%Y%m%d).txt
+      changed_when: false
+
+    - name: Generate package delta report
+      ansible.builtin.shell: |
+        PRE="/var/log/patching/pre-patch-$(date +%Y%m%d).txt"
+        POST="/var/log/patching/post-patch-$(date +%Y%m%d).txt"
+        if [ -f "$PRE" ] && [ -f "$POST" ]; then
+          echo "=== Packages Changed ===" > /var/log/patching/delta-$(date +%Y%m%d).txt
+          diff "$PRE" "$POST" >> /var/log/patching/delta-$(date +%Y%m%d).txt 2>&1 || true
+        fi
+      changed_when: false
+
+    - name: Generate comprehensive evidence report
+      ansible.builtin.copy:
+        content: |
+          ================================================================================
+          Security Patching Evidence Report
+          ================================================================================
+          Host: {{ inventory_hostname }}
+          Host ID: {{ airgap_host_id | default(ansible_machine_id) }}
+          Date: {{ ansible_date_time.iso8601 }}
+
+          KERNEL:
+            Running: {{ uname_result.stdout }}
+
+          OS RELEASE:
+          {{ os_release_content.content | b64decode }}
+
+          PATCH STATUS:
+            Start Time: {{ patch_start_time }}
+            End Time: {{ ansible_date_time.iso8601 }}
+            Updates Applied: {{ patch_result.changed | default(false) }}
+            Reboot Performed: {{ (reboot_required_file.stat.exists | default(false)) or (kernel_check.stdout == 'reboot_needed') }}
+
+          REMAINING SECURITY ADVISORIES:
+          {{ remaining_advisories.stdout | default('None') }}
+
+          VERIFICATION STATUS:
+          {% if remaining_advisories.stdout | default('') | trim == '' %}
+            PASS - No outstanding security advisories
+          {% else %}
+            INFO - Some advisories may require manual review
+          {% endif %}
+
+          ================================================================================
+        dest: /var/log/patching/evidence-{{ ansible_date_time.date }}.txt
+        mode: '0644'
+
+    - name: Fetch evidence files to controller
+      ansible.builtin.fetch:
+        src: "{{ item }}"
+        dest: "{{ evidence_output_dir | default('./artifacts/evidence') }}/{{ inventory_hostname }}/"
+        flat: true
+      loop:
+        - /var/log/patching/evidence-{{ ansible_date_time.date }}.txt
+        - /var/log/patching/delta-{{ ansible_date_time.date }}.txt
+      ignore_errors: true
+
     - name: Display patching summary
       ansible.builtin.debug:
         msg: |
           Patching complete for {{ inventory_hostname }}
+          - Kernel: {{ uname_result.stdout }}
           - Updates applied: {{ patch_result.changed | default(false) }}
-          - Reboot: {{ ansible_reboot_pending | default('not required') }}
+          - Reboot: {{ (reboot_required_file.stat.exists | default(false)) or (kernel_check.stdout == 'reboot_needed') }}
+          - Remaining advisories: {{ 'None' if (remaining_advisories.stdout | default('') | trim == '') else 'See report' }}

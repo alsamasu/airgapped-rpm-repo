@@ -1,13 +1,13 @@
 # config/spec.yaml
-# Airgapped RPM Repository System - Operator Configuration
+# Airgapped RPM Repository System - Satellite + Capsule Architecture
 #
 # This file is the SINGLE SOURCE OF TRUTH for all deployment inputs.
-# Fill in all required fields before running any automation.
+# Architecture: External Satellite (connected) + Internal Capsule (disconnected)
 #
 # Usage:
 #   1. Copy this file and fill in your environment-specific values
-#   2. Run: make validate-spec
-#   3. Run: make servers-deploy
+#   2. Run: .\scripts\operator.ps1 validate-spec
+#   3. Run: .\scripts\operator.ps1 deploy-servers
 #
 # All sensitive values (passwords) should be changed after initial deployment.
 
@@ -17,28 +17,22 @@
 vcenter:
   # vCenter or ESXi host address (IP or FQDN)
   server: "vcenter.example.local"
-  
+
   # Datacenter name (required for vCenter; ignored for ESXi direct connection)
   datacenter: "Datacenter"
-  
+
   # Cluster name OR specific ESXi host
-  # Use cluster for vCenter, or host for ESXi direct connection
   cluster: "Cluster01"
   # host: "esxi01.example.local"  # Alternative: direct ESXi host
-  
+
   # Datastore for VM storage
   datastore: "datastore1"
-  
-  # Optional: VM folder path (e.g., "Infrastructure/RPM-Servers")
+
+  # Optional: VM folder path
   folder: ""
-  
+
   # Optional: Resource pool name
   resource_pool: ""
-  
-  # Credentials (will be prompted if not set; can use environment variables)
-  # Use VMWARE_USER and VMWARE_PASSWORD environment variables for security
-  # username: ""
-  # password: ""
 
 # =============================================================================
 # Network Configuration
@@ -46,192 +40,299 @@ vcenter:
 network:
   # Port group name for VM network adapters
   portgroup_name: "LAN"
-  
-  # Network uses DHCP (static IP assignment not supported in automated install)
-  # After deployment, IPs are reported via make servers-report
+
+  # Network uses DHCP
   dhcp: true
+
+  # DNS servers (required for Satellite)
+  dns_servers:
+    - "8.8.8.8"
+    - "8.8.4.4"
+
+  # DNS search domain
+  dns_search: "example.local"
 
 # =============================================================================
 # ISO Paths
 # =============================================================================
 isos:
-  # Path to RHEL 9.6 ISO
-  # Can be local filesystem path or datastore path
-  # Local: "/path/to/rhel-9.6-x86_64-dvd.iso"
-  # Datastore: "[datastore1] isos/rhel-9.6-x86_64-dvd.iso"
+  # Path to RHEL 9.6 ISO (Satellite and Capsule require RHEL 9)
   rhel96_iso_path: "/isos/rhel-9.6-x86_64-dvd.iso"
-  
-  # Datastore folder where ISOs will be uploaded/stored
+
+  # Datastore folder for ISOs
   iso_datastore_folder: "isos"
 
 # =============================================================================
 # VM Names and Sizing
 # =============================================================================
 vm_names:
-  # External RPM server (internet-connected, syncs from Red Hat)
-  rpm_external: "rpm-external"
-  
-  # Internal RPM server (airgapped, publishes to managed hosts)
-  rpm_internal: "rpm-internal"
+  # External Satellite server (internet-connected)
+  satellite: "satellite-external"
 
+  # Internal Capsule server (airgapped)
+  capsule: "capsule-internal"
+
+# Satellite/Capsule require significant resources
+# Reference: https://access.redhat.com/documentation/en-us/red_hat_satellite
 vm_sizing:
-  external:
-    cpu: 2
-    memory_gb: 8
-    disk_gb: 200
-  internal:
-    cpu: 2
-    memory_gb: 8
-    disk_gb: 200
+  satellite:
+    cpu: 4                # Minimum 4 cores
+    memory_gb: 20         # Minimum 20 GB RAM
+    disk_os_gb: 50        # OS partition
+    disk_pulp_gb: 500     # /var/lib/pulp for content storage
+    disk_pgsql_gb: 50     # PostgreSQL data
+  capsule:
+    cpu: 4                # Minimum 4 cores
+    memory_gb: 16         # Minimum 16 GB RAM
+    disk_os_gb: 50        # OS partition
+    disk_pulp_gb: 300     # Content cache
 
 # =============================================================================
 # Bootstrap Credentials
 # =============================================================================
-# These are used ONLY during initial OS installation.
-# Change passwords after deployment for production use.
 credentials:
-  # Root password for initial access (will be set during kickstart)
+  # Root password for initial access
   initial_root_password: "ChangeMe123!"
-  
-  # Admin user for day-to-day operations (optional but recommended)
+
+  # Admin user for day-to-day operations
   initial_admin_user: "admin"
   initial_admin_password: "ChangeMe123!"
 
-# =============================================================================
-# Internal Server Services Configuration
-# =============================================================================
-internal_services:
-  # Unprivileged user for running podman containers and services
-  service_user: "rpmops"
-  
-  # Directories for airgap infrastructure
-  # These are created during kickstart with correct ownership
-  data_dir: "/srv/airgap/data"
-  certs_dir: "/srv/airgap/certs"
-  ansible_dir: "/srv/airgap/ansible"
+  # Satellite admin credentials
+  satellite_admin_user: "admin"
+  satellite_admin_password: "SatelliteAdmin123!"
 
 # =============================================================================
-# HTTPS Repository Configuration
+# Red Hat Subscription
 # =============================================================================
-https_internal_repo:
-  # Hostname for the internal repository (used in certificates and repo URLs)
-  # If empty, uses vm_names.rpm_internal
-  hostname: ""
-  
-  # HTTPS port for repository access
-  https_port: 8443
-  
-  # HTTP port (for health checks and redirects)
-  http_port: 8080
-  
-  # Self-signed certificate configuration
-  # Used for initial bootstrap; replace with CA-signed cert later
-  self_signed:
-    # Certificate subject fields
+# Required for Satellite and Capsule installation
+subscription:
+  # Red Hat Subscription Manager credentials
+  # Use rhsm_activation_key + rhsm_org_id OR rhsm_username + rhsm_password
+  rhsm_activation_key: ""
+  rhsm_org_id: ""
+  # Alternative: username/password (less secure)
+  # rhsm_username: ""
+  # rhsm_password: ""
+
+  # Satellite manifest file path (required for Satellite)
+  # Download from https://access.redhat.com/management/subscription_allocations
+  manifest_path: "/path/to/satellite-manifest.zip"
+
+  # Pool IDs for Satellite subscription (auto-attached if empty)
+  satellite_pool_id: ""
+
+# =============================================================================
+# Satellite Organization Configuration
+# =============================================================================
+satellite:
+  # Organization name (created during setup)
+  organization: "Default Organization"
+
+  # Location name (created during setup)
+  location: "Default Location"
+
+  # Lifecycle environments (order matters: Library -> test -> prod)
+  lifecycle_environments:
+    - name: "test"
+      description: "Testing environment for validation"
+      prior: "Library"
+    - name: "prod"
+      description: "Production environment for managed hosts"
+      prior: "test"
+
+  # Default lifecycle environment for new hosts
+  default_lifecycle_env: "prod"
+
+# =============================================================================
+# Content Configuration
+# =============================================================================
+content:
+  # RHEL 8 repository configuration
+  rhel8:
+    # Product name in Satellite
+    product: "Red Hat Enterprise Linux for x86_64"
+    # Repository sets to enable
+    repository_sets:
+      - name: "Red Hat Enterprise Linux 8 for x86_64 - BaseOS (RPMs)"
+        releasever: "8.10"
+        basearch: "x86_64"
+      - name: "Red Hat Enterprise Linux 8 for x86_64 - AppStream (RPMs)"
+        releasever: "8.10"
+        basearch: "x86_64"
+
+  # RHEL 9 repository configuration
+  rhel9:
+    product: "Red Hat Enterprise Linux for x86_64"
+    repository_sets:
+      - name: "Red Hat Enterprise Linux 9 for x86_64 - BaseOS (RPMs)"
+        releasever: "9.6"
+        basearch: "x86_64"
+      - name: "Red Hat Enterprise Linux 9 for x86_64 - AppStream (RPMs)"
+        releasever: "9.6"
+        basearch: "x86_64"
+
+# =============================================================================
+# Content Views
+# =============================================================================
+content_views:
+  # RHEL 8 Security Content View
+  - name: "cv_rhel8_security"
+    description: "RHEL 8 Security Updates Only"
+    repositories:
+      - product: "Red Hat Enterprise Linux for x86_64"
+        name: "Red Hat Enterprise Linux 8 for x86_64 - BaseOS RPMs 8.10"
+      - product: "Red Hat Enterprise Linux for x86_64"
+        name: "Red Hat Enterprise Linux 8 for x86_64 - AppStream RPMs 8.10"
+    filters:
+      - name: "security_errata_only"
+        type: "erratum"
+        inclusion: true
+        errata_type: "security"
+        # Date range (optional - leave empty for all security errata)
+        date_start: ""
+        date_end: ""
+
+  # RHEL 9 Security Content View
+  - name: "cv_rhel9_security"
+    description: "RHEL 9 Security Updates Only"
+    repositories:
+      - product: "Red Hat Enterprise Linux for x86_64"
+        name: "Red Hat Enterprise Linux 9 for x86_64 - BaseOS RPMs 9.6"
+      - product: "Red Hat Enterprise Linux for x86_64"
+        name: "Red Hat Enterprise Linux 9 for x86_64 - AppStream RPMs 9.6"
+    filters:
+      - name: "security_errata_only"
+        type: "erratum"
+        inclusion: true
+        errata_type: "security"
+        date_start: ""
+        date_end: ""
+
+# =============================================================================
+# Export/Import Configuration
+# =============================================================================
+export:
+  # Output directory for export bundles on Satellite
+  output_dir: "/var/lib/pulp/exports"
+
+  # Bundle naming pattern (timestamp appended automatically)
+  bundle_prefix: "airgap-security-bundle"
+
+  # Include metadata and checksums
+  include_manifest: true
+  include_checksums: true
+
+  # Sync policy: "complete" (full) or "incremental" (delta)
+  sync_policy: "complete"
+
+import:
+  # Import staging directory on Capsule
+  staging_dir: "/var/lib/pulp/imports"
+
+  # Verified bundles storage
+  verified_dir: "/var/lib/pulp/verified"
+
+# =============================================================================
+# Capsule Configuration
+# =============================================================================
+capsule:
+  # Capsule FQDN (used in certificates)
+  fqdn: "capsule-internal.example.local"
+
+  # Services to enable on Capsule
+  services:
+    - "content"           # Content proxy
+    - "pulp"              # Pulp content service
+
+  # HTTPS port for content
+  https_port: 443
+
+  # Enable HTTPS with server-auth TLS
+  tls_enabled: true
+
+  # Certificate configuration
+  certs:
+    # Self-signed for initial setup (production should use CA-signed)
+    self_signed: true
     country: "US"
     state: "Virginia"
     locality: "Arlington"
     organization: "Airgap Ops"
     organizational_unit: "Infrastructure"
-    # Common Name - defaults to hostname if empty
-    common_name: ""
-    # Subject Alternative Names (SANs)
-    # Include IP addresses and hostnames that will be used to access the repo
-    # Example: ["192.168.1.100", "rpm-internal.local"]
-    san_entries: []
-    # Certificate validity in days
     validity_days: 365
-
-# =============================================================================
-# Syslog TLS Forwarding Configuration
-# =============================================================================
-# Server-auth TLS only (hosts verify server certificate, no client certs)
-syslog_tls:
-  # Syslog server hostname or IP
-  target_host: "syslog.example.local"
-  
-  # Syslog TLS port (default: 6514)
-  target_port: 6514
-  
-  # Path to CA bundle file (on operator workstation) for trusting syslog server
-  # This file will be distributed to managed hosts
-  ca_bundle_local_path: "/path/to/syslog-ca-bundle.crt"
 
 # =============================================================================
 # Ansible Configuration
 # =============================================================================
 ansible:
-  # SSH credentials for initial host access
-  # After bootstrap_ssh_keys.yml, key-based auth is used
+  # SSH credentials for managed hosts
   ssh_username: "admin"
   ssh_password: "ChangeMe123!"
-  
-  # Become (sudo) password if different from ssh_password
-  # become_password: ""
-  
-  # Host inventory for onboarding
-  # These hosts will be configured to use the internal RPM repository
+
+  # Host inventory for patching
   host_inventory:
-    # RHEL 9 hosts
     rhel9_hosts:
-      - hostname_or_ip: "192.168.1.50"
-        airgap_host_id: "app-server-01"
+      - hostname_or_ip: "192.168.1.117"
+        airgap_host_id: "rhel9-tester"
         os_profile: "rhel9"
-        
-      - hostname_or_ip: "192.168.1.51"
-        airgap_host_id: "app-server-02"
-        os_profile: "rhel9"
-    
-    # RHEL 8 hosts
+        content_view: "cv_rhel9_security"
+        lifecycle_env: "prod"
+
     rhel8_hosts:
-      - hostname_or_ip: "192.168.1.60"
-        airgap_host_id: "legacy-app-01"
+      - hostname_or_ip: "192.168.1.87"
+        airgap_host_id: "rhel8-tester"
         os_profile: "rhel8"
+        content_view: "cv_rhel8_security"
+        lifecycle_env: "prod"
 
 # =============================================================================
-# Optional: CA-Signed Certificates (for production)
+# Syslog TLS Forwarding
 # =============================================================================
-# After initial deployment, replace self-signed certs with CA-signed
-# Use: make replace-tls-cert
-# ca_signed_certs:
-#   # Path to CA-signed certificate (PEM format)
-#   cert_path: "/path/to/rpm-internal.crt"
-#   # Path to private key (PEM format)
-#   key_path: "/path/to/rpm-internal.key"
-#   # Path to CA certificate chain (optional)
-#   ca_chain_path: "/path/to/ca-chain.crt"
+syslog_tls:
+  target_host: "syslog.example.local"
+  target_port: 6514
+  ca_bundle_local_path: "/path/to/syslog-ca-bundle.crt"
 
 # =============================================================================
-# Lifecycle Environments
-# =============================================================================
-lifecycle:
-  # Default lifecycle environment for managed hosts
-  default_env: "stable"
-  
-  # Available environments
-  environments:
-    - "testing"
-    - "stable"
-
-# =============================================================================
-# OpenSCAP and STIG Configuration
+# Compliance Configuration
 # =============================================================================
 compliance:
-  # Enable FIPS mode on internal VM (requires reboot)
+  # Enable FIPS mode
   enable_fips: true
-  
-  # STIG profile to apply
+
+  # STIG profile
   stig_profile: "xccdf_org.ssgproject.content_profile_stig"
-  
-  # Generate STIG checklist (CKL) files
+
+  # Generate STIG checklist files
   generate_ckl: true
 
 # =============================================================================
-# Manifest Collection
+# Evidence Collection
 # =============================================================================
-manifests:
-  # Local directory for storing collected manifests
-  output_dir: "./artifacts/manifests"
-  
-  # Include full package details (larger files)
-  include_full_details: true
+evidence:
+  # Base directory for evidence artifacts
+  output_dir: "./automation/artifacts/e2e-satellite-proof"
+
+  # Evidence subdirectories
+  workflow_dir: "workflow"
+  logs_dir: "logs"
+
+  # Generate truth-table.json
+  generate_truth_table: true
+
+# =============================================================================
+# Monthly Operations Schedule
+# =============================================================================
+schedule:
+  # Day of month for sync/publish operations
+  sync_day: 15
+
+  # Patch window (day of month, hour)
+  patch_window:
+    day: 20
+    hour: 2
+    timezone: "America/New_York"
+
+  # Auto-promote from test to prod after validation (hours)
+  auto_promote_delay_hours: 24

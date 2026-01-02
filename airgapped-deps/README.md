@@ -9,6 +9,11 @@ repository operator workflow on a Windows 11 laptop WITHOUT internet access.
 - `powercli/` - VMware.PowerCLI module and dependencies
 - `checksums/` - SHA256 verification files
 - `install-deps.ps1` - Offline installer script
+- `isos/` - Bootable ISOs for RPM server deployment
+  - `boot-external.iso` - Boot ISO for rpm-external server (338 MB)
+  - `boot-internal.iso` - Boot ISO for rpm-internal server (338 MB)
+  - `ks-external.cfg` - Kickstart file (embedded in boot-external.iso)
+  - `ks-internal.cfg` - Kickstart file (embedded in boot-internal.iso)
 
 ## IMPORTANT: Forbidden Tools
 
@@ -71,6 +76,103 @@ To verify checksums before installation:
    ```powershell
    Get-Module -ListAvailable VMware.PowerCLI
    ```
+
+## Deploying RPM Servers (rpm-external and rpm-internal)
+
+The ISOs in the `isos/` directory are **REQUIRED** to deploy the rpm-external and
+rpm-internal RHEL 9.6 servers. These ISOs contain embedded kickstart configurations
+that automate the installation.
+
+### Why Custom Boot ISOs Are Required
+
+RHEL 9.6 does not auto-detect kickstart files from OEMDRV-labeled volumes without
+explicit kernel boot parameters. These custom ISOs include:
+- RHEL 9.6 kernel and initrd (extracted from DVD)
+- Modified GRUB configuration with `inst.ks=hd:LABEL=OEMDRV:/ks.cfg`
+- Embedded kickstart file for fully automated installation
+
+### Prerequisites
+
+1. RHEL 9.6 DVD ISO uploaded to vSphere datastore (e.g., `[datastore] isos/rhel-9.6-x86_64-dvd.iso`)
+2. Boot ISOs uploaded to vSphere datastore:
+   - `[datastore] isos/boot-external.iso`
+   - `[datastore] isos/boot-internal.iso`
+
+### Deployment Steps
+
+1. **Upload ISOs to vSphere Datastore**
+   ```powershell
+   # Connect to vSphere
+   Connect-VIServer -Server <vcenter-ip>
+
+   # Create PSDrive for datastore access
+   $ds = Get-Datastore -Name "<datastore-name>"
+   New-PSDrive -Name ds -Location $ds -PSProvider VimDatastore -Root "\"
+
+   # Upload boot ISOs
+   Copy-DatastoreItem -Item "C:\src\airgapped-deps\isos\boot-external.iso" -Destination "ds:\isos\"
+   Copy-DatastoreItem -Item "C:\src\airgapped-deps\isos\boot-internal.iso" -Destination "ds:\isos\"
+   ```
+
+2. **Create VMs with Dual CD Drives**
+
+   Each VM requires TWO CD drives:
+   - **CD Drive 1**: Boot ISO (boot-external.iso or boot-internal.iso)
+   - **CD Drive 2**: RHEL 9.6 DVD ISO
+
+   ```powershell
+   # Example for rpm-external
+   $vm = New-VM -Name "rpm-external" -ResourcePool (Get-ResourcePool) -Datastore $ds `
+       -NumCpu 2 -MemoryGB 4 -DiskGB 200 -GuestId "rhel9_64Guest"
+
+   # Add CD drives
+   $bootIso = "[$($ds.Name)] isos/boot-external.iso"
+   $rhelDvd = "[$($ds.Name)] isos/rhel-9.6-x86_64-dvd.iso"
+
+   New-CDDrive -VM $vm -IsoPath $bootIso -StartConnected:$true
+   New-CDDrive -VM $vm -IsoPath $rhelDvd -StartConnected:$true
+
+   # Start VM - installation is fully automated
+   Start-VM -VM $vm
+   ```
+
+3. **Wait for Installation**
+
+   The kickstart installation takes approximately 10-15 minutes. The VM will:
+   - Boot from the boot ISO
+   - Load kernel/initrd and find the kickstart file
+   - Install RHEL 9.6 from the DVD
+   - Configure networking (DHCP), users, and services
+   - Reboot automatically when complete
+
+4. **Verify Deployment**
+   ```powershell
+   # Check VM has IP address (indicates successful installation)
+   $vm = Get-VM -Name "rpm-external"
+   $vm.Guest.IPAddress
+
+   # SSH to verify
+   ssh admin@<ip-address>  # Password: 12qwaszx!@QWASZX
+   ```
+
+### Default Credentials
+
+The kickstart files configure these default credentials:
+- **root**: `12qwaszx!@QWASZX`
+- **admin** (sudo): `12qwaszx!@QWASZX`
+
+### Installed Packages
+
+The RPM servers are pre-configured with:
+- httpd (Apache web server)
+- createrepo_c (repository metadata tools)
+- dnf-utils (repository management)
+- python3
+
+### Network Configuration
+
+Both servers use DHCP. After installation, configure static IPs as needed for
+your airgapped network environment.
 
 ## Next Steps
 

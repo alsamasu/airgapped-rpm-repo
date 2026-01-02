@@ -1,114 +1,217 @@
-# VMware Kickstart ISO Injection
+# VMware RPM Server Deployment
 
-This directory contains documentation and layout for the kickstart ISO injection method used for automated RHEL installation.
+This directory contains documentation for deploying RHEL 9.6 RPM servers using VMware vSphere.
+
+## Boot ISO Method (Required for RHEL 9.6)
+
+**IMPORTANT**: RHEL 9.6 does NOT auto-detect kickstart files from OEMDRV-labeled volumes
+without explicit kernel boot parameters. The traditional two-CD method (RHEL DVD + OEMDRV ISO)
+will NOT work for automated installations.
+
+### Solution: Custom Boot ISOs
+
+Pre-built boot ISOs are included in `airgapped-deps.zip`:
+
+| ISO | Purpose | Size |
+|-----|---------|------|
+| `boot-external.iso` | Boot ISO for rpm-external server | 338 MB |
+| `boot-internal.iso` | Boot ISO for rpm-internal server | 338 MB |
+
+These ISOs contain:
+- RHEL 9.6 kernel and initrd (extracted from DVD)
+- Modified GRUB configuration with `inst.ks=hd:LABEL=OEMDRV:/ks.cfg`
+- Embedded kickstart file for fully automated installation
 
 ## How It Works
 
-VMware supports mounting multiple CD/DVD drives to a VM. We use this to provide:
+VMware VMs are configured with TWO CD/DVD drives:
 
-1. **CD/DVD #1**: Official RHEL 9.6 installation ISO
-2. **CD/DVD #2**: Custom kickstart ISO (labeled `OEMDRV`)
+1. **CD/DVD #1**: Custom boot ISO (boot-external.iso or boot-internal.iso)
+   - Provides bootloader with kickstart parameters
+   - Contains kernel, initrd, and embedded kickstart
 
-When Anaconda (the RHEL installer) boots, it automatically searches for a volume labeled `OEMDRV` and loads the `ks.cfg` file from it. This enables fully automated installation without any boot menu timing or manual intervention.
+2. **CD/DVD #2**: Official RHEL 9.6 installation DVD
+   - Provides `inst.stage2` (installation image)
+   - Provides all RPM packages
 
-## KS ISO Layout
+### Boot Sequence
 
-The kickstart ISO has the following structure:
+1. VM boots from boot ISO (CD #1)
+2. GRUB loads with pre-configured `inst.ks=hd:LABEL=OEMDRV:/ks.cfg`
+3. Kernel and initrd load from boot ISO
+4. Anaconda finds stage2 on RHEL DVD (CD #2) via `inst.stage2=hd:LABEL=RHEL-9-6-0-BaseOS-x86_64`
+5. Anaconda finds kickstart on boot ISO (OEMDRV label)
+6. Installation proceeds automatically
+7. System reboots when complete
 
+## Deployment Steps
+
+### 1. Upload ISOs to Datastore
+
+```powershell
+# Connect to vSphere
+$cred = Get-Credential
+Connect-VIServer -Server <vcenter-ip> -Credential $cred
+
+# Access datastore
+$ds = Get-Datastore -Name "<datastore-name>"
+New-PSDrive -Name ds -Location $ds -PSProvider VimDatastore -Root "\"
+
+# Upload boot ISOs (from airgapped-deps.zip)
+Copy-DatastoreItem -Item "C:\src\airgapped-deps\isos\boot-external.iso" -Destination "ds:\isos\"
+Copy-DatastoreItem -Item "C:\src\airgapped-deps\isos\boot-internal.iso" -Destination "ds:\isos\"
+
+# Ensure RHEL DVD is also on datastore
+# Copy-DatastoreItem -Item "C:\path\to\rhel-9.6-x86_64-dvd.iso" -Destination "ds:\isos\"
 ```
-ks-iso/
-├── ks.cfg              # Main kickstart configuration file
-└── (optional additional files)
+
+### 2. Create and Configure VMs
+
+```powershell
+# Create VM
+$vm = New-VM -Name "rpm-external" -ResourcePool (Get-ResourcePool) -Datastore $ds `
+    -NumCpu 2 -MemoryGB 4 -DiskGB 200 -GuestId "rhel9_64Guest" -NetworkName "VM Network"
+
+# Add CD drive 1 with boot ISO
+New-CDDrive -VM $vm -IsoPath "[$($ds.Name)] isos/boot-external.iso" -StartConnected:$true
+
+# Add CD drive 2 with RHEL DVD
+New-CDDrive -VM $vm -IsoPath "[$($ds.Name)] isos/rhel-9.6-x86_64-dvd.iso" -StartConnected:$true
+
+# Start VM - installation is fully automated
+Start-VM -VM $vm
 ```
 
-## Volume Label
+### 3. Monitor Installation
 
-The ISO **must** be labeled `OEMDRV` for Anaconda to auto-detect it:
+Installation takes 10-15 minutes. Monitor progress:
+
+```powershell
+# Check for IP address (indicates installation complete)
+do {
+    Start-Sleep -Seconds 30
+    $vm = Get-VM -Name "rpm-external"
+    $ip = $vm.Guest.IPAddress | Where-Object { $_ -match '^\d+\.\d+\.\d+\.\d+$' }
+    Write-Host "Waiting for IP... Current: $ip"
+} while (-not $ip)
+
+Write-Host "Installation complete. IP: $ip"
+```
+
+### 4. Verify Installation
+
+```powershell
+# SSH to the new server
+ssh admin@$ip  # Password: 12qwaszx!@QWASZX
+
+# On the server, verify services
+systemctl status httpd
+systemctl status sshd
+```
+
+## Default Credentials
+
+The kickstart files configure:
+
+| User | Password | Notes |
+|------|----------|-------|
+| root | `12qwaszx!@QWASZX` | Direct root login |
+| admin | `12qwaszx!@QWASZX` | Sudo access via wheel group |
+
+**Change these passwords immediately after deployment in production environments.**
+
+## Kickstart Configuration
+
+### External Server (rpm-external)
+
+- Hostname: `rpm-external`
+- Packages: httpd, python3, dnf-utils, createrepo_c
+- Services: httpd, sshd, chronyd
+- Firewall: disabled (configure as needed)
+- SELinux: permissive
+
+### Internal Server (rpm-internal)
+
+- Hostname: `rpm-internal`
+- Packages: httpd, python3, dnf-utils, createrepo_c
+- Services: httpd, sshd, chronyd
+- Firewall: disabled (configure as needed)
+- SELinux: permissive
+
+## Customizing Kickstart Files
+
+Source kickstart files are in `airgapped-deps/isos/`:
+- `ks-external.cfg`
+- `ks-internal.cfg`
+
+To rebuild ISOs with modified kickstart:
 
 ```bash
-# Linux (genisoimage/mkisofs)
-genisoimage -o ks.iso -V "OEMDRV" -R -J /path/to/ks-files/
+# Extract boot files from RHEL DVD
+mount /dev/sr0 /mnt
+cp -r /mnt/images/pxeboot /tmp/rhel-boot/
+cp -r /mnt/EFI/BOOT /tmp/rhel-boot/EFI/
+cp -r /mnt/isolinux /tmp/rhel-boot/
 
-# Windows (oscdimg from Windows ADK)
-oscdimg -l"OEMDRV" -o -m /path/to/ks-files ks.iso
+# Modify kickstart as needed
+vim /tmp/rhel-boot/ks.cfg
+
+# Create GRUB config with kickstart parameter
+cat > /tmp/rhel-boot/EFI/BOOT/grub.cfg << 'EOF'
+set timeout=5
+set default=0
+
+menuentry "Install RHEL 9.6 (Kickstart)" {
+    linux /images/pxeboot/vmlinuz inst.stage2=hd:LABEL=RHEL-9-6-0-BaseOS-x86_64 inst.ks=hd:LABEL=OEMDRV:/ks.cfg quiet
+    initrd /images/pxeboot/initrd.img
+}
+EOF
+
+# Build ISO
+genisoimage -o boot-custom.iso \
+    -b isolinux/isolinux.bin -c isolinux/boot.cat \
+    -no-emul-boot -boot-load-size 4 -boot-info-table \
+    -eltorito-alt-boot -e EFI/BOOT/BOOTX64.EFI -no-emul-boot \
+    -V "OEMDRV" -R -J /tmp/rhel-boot/
 ```
-
-## Kickstart Files
-
-Two kickstart configurations are generated from templates:
-
-| File | Purpose |
-|------|---------|
-| `rhel96_external.ks` | External RPM server (internet-connected) |
-| `rhel96_internal.ks` | Internal RPM server (airgapped, FIPS, rootless podman) |
-
-Templates are in `automation/kickstart/` and use placeholders replaced by values from `config/spec.yaml`.
-
-## Placeholders
-
-| Placeholder | Source |
-|-------------|--------|
-| `{{HOSTNAME}}` | `vm_names.rpm_external` or `vm_names.rpm_internal` |
-| `{{ROOT_PASSWORD}}` | `credentials.initial_root_password` |
-| `{{ADMIN_USER}}` | `credentials.initial_admin_user` |
-| `{{ADMIN_PASSWORD}}` | `credentials.initial_admin_password` |
-| `{{SERVICE_USER}}` | `internal_services.service_user` |
-| `{{DATA_DIR}}` | `internal_services.data_dir` |
-| `{{CERTS_DIR}}` | `internal_services.certs_dir` |
-| `{{ANSIBLE_DIR}}` | `internal_services.ansible_dir` |
-| `{{FIPS_ENABLED}}` | `compliance.enable_fips` |
-| `{{HTTP_PORT}}` | `https_internal_repo.http_port` |
-| `{{HTTPS_PORT}}` | `https_internal_repo.https_port` |
-
-## Generation Process
-
-1. `generate-ks-iso.ps1` reads `config/spec.yaml`
-2. Loads kickstart template from `automation/kickstart/`
-3. Replaces placeholders with configuration values
-4. Creates staging directory with `ks.cfg`
-5. Builds ISO with `OEMDRV` volume label
-6. Outputs to `output/ks-isos/`
-
-## Verification
-
-After ISO generation, verify contents:
-
-```bash
-# Mount and check (Linux)
-sudo mount -o loop ks-external.iso /mnt
-cat /mnt/ks.cfg
-sudo umount /mnt
-
-# Check label
-isoinfo -d -i ks-external.iso | grep "Volume id"
-# Should show: Volume id: OEMDRV
-```
-
-## Boot Process
-
-1. VM boots from RHEL ISO (CD #1)
-2. Anaconda starts and detects `OEMDRV` volume (CD #2)
-3. Kickstart file is loaded automatically
-4. Installation proceeds without user interaction
-5. System reboots and ejects CDs
-6. VMware Tools start, indicating completion
 
 ## Troubleshooting
 
-### Kickstart Not Loading
+### VM Boots to GRUB Shell
 
-- Verify ISO has `OEMDRV` label
-- Check both CD drives are connected at boot
-- Verify kickstart syntax: `ksvalidator ks.cfg`
+- Verify boot ISO is in CD drive 1 (first CD)
+- Check ISO was built with correct boot sectors
 
-### Installation Fails
+### Kickstart Not Found
 
-- Check VM console for Anaconda error messages
-- Verify disk space meets kickstart requirements
-- Ensure network connectivity for DHCP
+- Verify boot ISO has `OEMDRV` volume label
+- Check `inst.ks=hd:LABEL=OEMDRV:/ks.cfg` in GRUB config
 
-### VMware Tools Not Running
+### Stage2 Not Found
 
-- Installation may still be in progress
-- Check if FIPS mode reboot is pending (internal VM)
-- Verify open-vm-tools package was installed
+- Verify RHEL DVD is in CD drive 2
+- Check DVD label matches `inst.stage2=hd:LABEL=RHEL-9-6-0-BaseOS-x86_64`
+
+### Installation Hangs
+
+- Check VM console for error messages
+- Verify both CDs are connected (not just configured)
+- Ensure adequate disk space (200GB recommended)
+
+### No Network After Install
+
+- Verify VM network adapter is connected
+- Check DHCP server is available on the network
+- Review `/var/log/anaconda/` for network errors
+
+## Legacy OEMDRV Method (Does NOT Work with RHEL 9.6)
+
+The traditional two-ISO method where:
+1. CD #1 = RHEL DVD
+2. CD #2 = Small OEMDRV-labeled ISO with ks.cfg
+
+**Does NOT work** with RHEL 9.6 because Anaconda requires explicit `inst.ks=` kernel
+parameter to find the kickstart file. The auto-detection of OEMDRV volumes no longer
+functions without this parameter.
+
+Use the boot ISO method described above instead.

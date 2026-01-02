@@ -104,12 +104,12 @@ function New-KickstartISO {
     Write-Host "Creating ISO for $VMType..." -ForegroundColor Yellow
     
     # Determine ISO creation tool
-    $isWindows = $PSVersionTable.PSVersion.Major -ge 6 -and $IsWindows
-    if (-not $isWindows) {
-        $isWindows = $env:OS -eq "Windows_NT"
+    $runningOnWindows = $PSVersionTable.PSVersion.Major -ge 6 -and $IsWindows
+    if (-not $runningOnWindows) {
+        $runningOnWindows = $env:OS -eq "Windows_NT"
     }
-    
-    if ($isWindows) {
+
+    if ($runningOnWindows) {
         # Try oscdimg from Windows ADK
         $oscdimg = Get-Command oscdimg -ErrorAction SilentlyContinue
         if (-not $oscdimg) {

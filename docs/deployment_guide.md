@@ -1,36 +1,66 @@
-# Deployment Guide
+# Deployment Guide - Red Hat Satellite + Capsule Architecture
 
 ## Overview
 
-This guide covers the deployment of the airgapped RPM repository infrastructure consisting of two RHEL 9.6 servers:
+This guide covers the deployment of the airgapped RPM repository infrastructure using Red Hat Satellite and Capsule:
 
-- **External Server** (`rpm-external`): Internet-connected system that syncs packages from Red Hat CDN and prepares bundles for hand-carry transfer
-- **Internal Server** (`rpm-internal`): Airgapped system that hosts the internal RPM repository serving managed RHEL hosts
+- **External Satellite Server** (`satellite-external`): Internet-connected RHEL 9.6 system that syncs content from Red Hat CDN, manages Content Views, and exports bundles for hand-carry transfer
+- **Internal Capsule Server** (`capsule-internal`): Airgapped RHEL 9.6 system that imports content bundles and serves packages to managed hosts over HTTPS
 
-The deployment automation uses VMware PowerCLI scripts with kickstart injection for fully automated installation. Two deployment methods are available:
+### Architecture Summary
 
-1. **Kickstart ISO Injection**: Direct deployment from RHEL 9.6 ISO with automated kickstart configuration
-2. **OVA Deployment**: Pre-built appliance images with first-boot customization via OVF properties
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           EXTERNAL (Connected)                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │  Red Hat Satellite 6.15+                                             │  │
+│  │  - Syncs from Red Hat CDN                                            │  │
+│  │  - Content Views: cv_rhel8_security, cv_rhel9_security              │  │
+│  │  - Lifecycle: Library → test → prod                                  │  │
+│  │  - Exports security-filtered bundles                                 │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                     │
+                              [Hand-Carry Transfer]
+                                     │
+                                     ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           INTERNAL (Airgapped)                              │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │  Red Hat Capsule                                                     │  │
+│  │  - Imports content bundles                                           │  │
+│  │  - Serves RHEL 8.10 + 9.6 content over HTTPS                        │  │
+│  │  - Managed hosts connect here for updates                            │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                                    │                                        │
+│                         ┌──────────┴──────────┐                            │
+│                         ▼                     ▼                            │
+│                 ┌──────────────┐      ┌──────────────┐                     │
+│                 │ RHEL 8.10    │      │ RHEL 9.6     │                     │
+│                 │ Tester Host  │      │ Tester Host  │                     │
+│                 └──────────────┘      └──────────────┘                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
-> ⚠️ **Authoritative Prerequisites Guardrail**
+
+> **Authoritative Prerequisites Guardrail**
 >
 > This section is the **single source of truth** for Windows 11 operator prerequisites.
 >
 > **Rules:**
-> - No additional software requirements may be inferred, suggested, or added unless:
->   1) They are explicitly invoked by a documented command in this guide, **and**
->   2) The command fails without them.
+> - No additional software requirements may be inferred or added unless explicitly invoked.
 > - If a tool is not directly executed by the operator workflow, it is **not a prerequisite**.
-> - Generic assumptions (e.g., “PowerShell automation usually needs X”) are invalid.
 >
 > **Explicitly forbidden requirement inflation:**
 > - Do NOT require Python unless the operator runs Python directly.
 > - Do NOT require Windows ADK/WinPE unless building Windows images.
 > - Do NOT require YAML modules unless the operator imports them.
 > - Do NOT require GNU Make on Windows.
->
-> Any deviation from this list is a documentation defect.
+> - Do NOT require Git on Windows.
+> - Do NOT require WSL.
+
+---
 
 ## Obtaining the Software
 
@@ -43,7 +73,7 @@ You will receive two ZIP files:
 | Package | Contents | Size |
 |---------|----------|------|
 | `airgapped-deps.zip` | PowerShell 7 MSI, VMware.PowerCLI modules | ~200MB |
-| `airgapped-rpm-repo.zip` | Repository scripts and configuration | ~5MB |
+| `airgapped-rpm-repo.zip` | Repository scripts, kickstarts, Ansible playbooks | ~5MB |
 
 ### Extraction Steps
 
@@ -59,8 +89,6 @@ Expand-Archive -Path .\airgapped-rpm-repo.zip -DestinationPath C:\src\airgapped-
 ```
 
 ### Install Dependencies (Air-gapped)
-
-Before using the operator workflow, install the prerequisites from the airgapped-deps package:
 
 ```powershell
 # Open PowerShell as Administrator
@@ -79,11 +107,9 @@ After installation, open a **new PowerShell 7 terminal** (`pwsh`) to continue.
 
 ## Windows 11 Laptop (Primary Workflow)
 
-This is the **recommended workflow** for operators running from a Windows 11 laptop.
-
 ### Prerequisites
 
-If you installed from `airgapped-deps.zip` (see above), these are already satisfied.
+If you installed from `airgapped-deps.zip`, these are already satisfied.
 
 1. **PowerShell 7+**
    ```powershell
@@ -100,7 +126,7 @@ If you installed from `airgapped-deps.zip` (see above), these are already satisf
    Set-PowerCLIConfiguration -InvalidCertificateAction Ignore -Confirm:$false
    ```
 
-> **Note:** Per the guardrails above, Python, Windows ADK, powershell-yaml, Git, and WSL are explicitly **NOT REQUIRED** for the operator workflow. Use ZIP-based delivery.
+> **Note:** Python, Windows ADK, powershell-yaml, Git, WSL, and GNU Make are explicitly **NOT REQUIRED**.
 
 ### Set VMware Credentials
 
@@ -109,7 +135,9 @@ $env:VMWARE_USER = "administrator@vsphere.local"
 $env:VMWARE_PASSWORD = "YourSecurePassword"
 ```
 
-### Quick Start: Full Deployment
+---
+
+## Quick Start: Full Deployment
 
 ```powershell
 # 1. Initialize configuration from vSphere discovery
@@ -121,68 +149,49 @@ notepad config\spec.yaml
 # 3. Validate configuration
 .\scripts\operator.ps1 validate-spec
 
-# 4. Deploy servers (will prompt for confirmation)
+# 4. Deploy Satellite and Capsule servers
 .\scripts\operator.ps1 deploy-servers
 
 # 5. Check deployment status and get IP addresses
 .\scripts\operator.ps1 report-servers
 ```
 
-### Operator CLI Reference
+---
 
-The `scripts\operator.ps1` script is the single canonical entrypoint for all operations:
+## VM Sizing Requirements
 
-| Command | Description |
-|---------|-------------|
-| `.\scripts\operator.ps1 init-spec` | Discover vSphere and initialize spec.yaml |
-| `.\scripts\operator.ps1 validate-spec` | Validate spec.yaml configuration |
-| `.\scripts\operator.ps1 deploy-servers` | Deploy External and Internal RPM servers |
-| `.\scripts\operator.ps1 report-servers` | Report VM status and DHCP IPs |
-| `.\scripts\operator.ps1 destroy-servers` | Destroy all deployed VMs |
-| `.\scripts\operator.ps1 build-ovas` | Build OVAs from running VMs |
-| `.\scripts\operator.ps1 guide-validate` | Validate operator guides |
-| `.\scripts\operator.ps1 e2e` | Run full E2E test suite |
+### Satellite Server (External)
 
-#### Common Options
+| Resource | Minimum | Recommended |
+|----------|---------|-------------|
+| CPU | 4 vCPU | 4 vCPU |
+| Memory | 20 GB | 32 GB |
+| OS Disk | 50 GB | 100 GB |
+| PostgreSQL Disk | 100 GB | 200 GB |
+| Pulp Content Disk | 500 GB | 1 TB |
 
-```powershell
-# Skip confirmation prompts
-.\scripts\operator.ps1 deploy-servers -Force
+### Capsule Server (Internal)
 
-# Custom spec path
-.\scripts\operator.ps1 validate-spec -SpecPath C:\path\to\spec.yaml
+| Resource | Minimum | Recommended |
+|----------|---------|-------------|
+| CPU | 4 vCPU | 4 vCPU |
+| Memory | 16 GB | 20 GB |
+| OS Disk | 50 GB | 100 GB |
+| Pulp Content Disk | 300 GB | 500 GB |
 
-# Keep VMs after E2E test
-.\scripts\operator.ps1 e2e -KeepVMs
+### Tester Hosts
 
-# Show what would be done without executing
-.\scripts\operator.ps1 deploy-servers -WhatIf
-
-# Get help
-.\scripts\operator.ps1 -Help
-```
+| Resource | Value |
+|----------|-------|
+| CPU | 2 vCPU |
+| Memory | 4 GB |
+| OS Disk | 50 GB |
 
 ---
 
-## Detailed Deployment Steps
+## Configuration Reference
 
-### Step 1: Initialize Configuration
-
-Discover your vSphere environment and generate initial configuration:
-
-```powershell
-.\scripts\operator.ps1 init-spec
-```
-
-This will:
-1. Connect to vCenter/ESXi
-2. Discover datacenters, clusters, datastores, and networks
-3. Generate `automation/artifacts/spec.detected.yaml`
-4. Copy to `config/spec.yaml`
-
-### Step 2: Customize Configuration
-
-Edit `config/spec.yaml` with your environment-specific values:
+### spec.yaml Structure
 
 ```yaml
 vcenter:
@@ -197,20 +206,58 @@ network:
 
 isos:
   rhel96_iso_path: "[datastore1] isos/rhel-9.6-x86_64-dvd.iso"
+  rhel810_iso_path: "[datastore1] isos/rhel-8.10-x86_64-dvd.iso"
 
-vm_names:
-  rpm_external: "rpm-external"
-  rpm_internal: "rpm-internal"
+# Satellite Configuration
+satellite:
+  organization: "Default Organization"
+  location: "Default Location"
+  lifecycle_environments:
+    - name: "test"
+      prior: "Library"
+    - name: "prod"
+      prior: "test"
 
+# Content Views with Security Filtering
+content_views:
+  - name: "cv_rhel8_security"
+    repositories:
+      - product: "Red Hat Enterprise Linux for x86_64"
+        name: "Red Hat Enterprise Linux 8 for x86_64 - BaseOS RPMs 8.10"
+      - product: "Red Hat Enterprise Linux for x86_64"
+        name: "Red Hat Enterprise Linux 8 for x86_64 - AppStream RPMs 8.10"
+    filters:
+      - name: "security_errata_only"
+        type: "erratum"
+        errata_type: "security"
+  - name: "cv_rhel9_security"
+    repositories:
+      - product: "Red Hat Enterprise Linux for x86_64"
+        name: "Red Hat Enterprise Linux 9 for x86_64 - BaseOS RPMs 9.6"
+      - product: "Red Hat Enterprise Linux for x86_64"
+        name: "Red Hat Enterprise Linux 9 for x86_64 - AppStream RPMs 9.6"
+    filters:
+      - name: "security_errata_only"
+        type: "erratum"
+        errata_type: "security"
+
+# VM Sizing
 vm_sizing:
-  external:
+  satellite:
+    cpu: 4
+    memory_gb: 20
+    os_disk_gb: 100
+    pgsql_disk_gb: 100
+    pulp_disk_gb: 500
+  capsule:
+    cpu: 4
+    memory_gb: 16
+    os_disk_gb: 100
+    pulp_disk_gb: 300
+  tester:
     cpu: 2
-    memory_gb: 8
-    disk_gb: 200
-  internal:
-    cpu: 2
-    memory_gb: 8
-    disk_gb: 200
+    memory_gb: 4
+    disk_gb: 50
 
 credentials:
   initial_root_password: "ChangeMe123!"
@@ -221,171 +268,247 @@ compliance:
   enable_fips: true
 ```
 
-### Step 3: Validate Configuration
+---
+
+## Detailed Deployment Steps
+
+### Step 1: Deploy Satellite Server (External)
+
+The Satellite server is deployed to the connected network with internet access.
 
 ```powershell
-.\scripts\operator.ps1 validate-spec
+.\scripts\operator.ps1 deploy-satellite
 ```
 
-Fix any reported errors before proceeding.
-
-### Step 4: Deploy Servers
+After VM deployment, SSH in and run the installation:
 
 ```powershell
-.\scripts\operator.ps1 deploy-servers
+# SSH to Satellite server
+ssh admin@<satellite-ip>
+
+# Run Satellite installation (requires Red Hat subscription)
+sudo /opt/satellite-setup/satellite-install.sh \
+  --manifest /path/to/manifest.zip \
+  --org "Default Organization"
 ```
 
-The deployment will:
-1. Generate kickstart ISOs
-2. Upload ISOs to VMware datastore
-3. Create VMs with correct sizing
-4. Mount RHEL ISO and kickstart ISO
-5. Power on VMs for automated installation
-
-Installation typically takes 10-20 minutes per VM.
-
-### Step 5: Verify Deployment
+### Step 2: Configure Content
 
 ```powershell
-# Get VM status and IP addresses
-.\scripts\operator.ps1 report-servers
+# Enable RHEL repositories and create Content Views
+ssh admin@<satellite-ip> "sudo /opt/satellite-setup/satellite-configure-content.sh --org 'Default Organization' --sync --create-cv"
+```
 
-# Verify SSH connectivity
-ssh admin@<internal-ip> "cat /etc/airgap-role"
+This script:
+1. Enables RHEL 8.10 and RHEL 9.6 BaseOS + AppStream repositories
+2. Syncs content from Red Hat CDN
+3. Creates security-filtered Content Views
+4. Publishes and promotes to test/prod lifecycle environments
 
-# Check internal server services
-ssh admin@<internal-ip> "systemctl --user -M rpmops@ status airgap-rpm-publisher.service"
+### Step 3: Deploy Capsule Server (Internal)
 
-# Test HTTPS endpoint
-curl -k https://<internal-ip>:8443/
+The Capsule server is deployed to the airgapped network.
+
+```powershell
+.\scripts\operator.ps1 deploy-capsule
+```
+
+### Step 4: Export Content Bundle
+
+On the Satellite server, export the Content Views for hand-carry transfer:
+
+```powershell
+ssh admin@<satellite-ip> "sudo /opt/satellite-setup/satellite-export-bundle.sh \
+  --org 'Default Organization' \
+  --lifecycle-env prod \
+  --output-dir /var/lib/pulp/exports"
+```
+
+### Step 5: Transfer Bundle
+
+Copy the bundle to removable media for hand-carry transfer:
+
+```powershell
+# From Satellite server to USB/removable media
+scp admin@<satellite-ip>:/var/lib/pulp/exports/airgap-security-bundle-*.tar.gz /path/to/usb/
+scp admin@<satellite-ip>:/var/lib/pulp/exports/airgap-security-bundle-*.tar.gz.sha256 /path/to/usb/
+```
+
+### Step 6: Import Content on Capsule
+
+On the internal network, import the bundle:
+
+```powershell
+# Copy from USB to Capsule
+scp /path/to/usb/airgap-security-bundle-*.tar.gz admin@<capsule-ip>:/var/lib/pulp/imports/
+
+# Import the bundle
+ssh admin@<capsule-ip> "sudo /opt/capsule-setup/capsule-import-bundle.sh \
+  --bundle /var/lib/pulp/imports/airgap-security-bundle-*.tar.gz \
+  --org 'Default Organization'"
+```
+
+### Step 7: Configure Managed Hosts
+
+Run the Ansible playbook to configure hosts to use the Capsule:
+
+```powershell
+ssh admin@<management-host> "cd /srv/airgap/ansible && \
+  ansible-playbook -i inventories/lab.yml playbooks/configure_capsule_repos.yml"
 ```
 
 ---
 
 ## Post-Deployment Validation
 
-### Run E2E Tests
+### Verify Satellite
 
 ```powershell
-.\scripts\operator.ps1 e2e
+ssh admin@<satellite-ip> "hammer ping"
+ssh admin@<satellite-ip> "hammer content-view list --organization 'Default Organization'"
 ```
 
-Reports are generated in `automation/artifacts/e2e/`.
-
-### Build OVA Appliances
-
-After successful E2E validation, export VMs as OVAs for future deployments:
+### Verify Capsule Content
 
 ```powershell
-.\scripts\operator.ps1 build-ovas
+ssh admin@<capsule-ip> "dnf repolist"
+ssh admin@<capsule-ip> "curl -k https://localhost/content/"
 ```
 
-OVAs are saved to `automation/artifacts/ovas/`.
+### Verify Managed Hosts
+
+```powershell
+ssh admin@<tester-host> "dnf repolist"
+ssh admin@<tester-host> "dnf check-update --security"
+```
 
 ---
 
-## Initial System State
+## Operator CLI Reference
 
-| Component | State |
-|-----------|-------|
-| Repository Service | Running under rpmops user |
-| TLS Certificate | Self-signed (replace for production) |
-| Repository Content | Empty (import first bundle) |
-| FIPS Mode | Enabled on internal server |
-
----
-
-## Appendix A: Linux/macOS Operators
-
-For operators on Linux or macOS, you can use either the PowerShell operator script (after installing PowerShell Core) or the Makefile targets.
-
-### Install PowerShell Core
-
-```bash
-# RHEL/CentOS
-sudo dnf install -y powershell
-
-# Ubuntu/Debian
-sudo apt-get install -y powershell
-
-# macOS
-brew install powershell
-```
-
-Then use the same operator commands:
-
-```bash
-pwsh scripts/operator.ps1 validate-spec
-pwsh scripts/operator.ps1 deploy-servers
-```
-
-### Alternative: Makefile Targets
-
-If GNU Make is available:
-
-| Make Command | Equivalent Operator Command |
-|--------------|----------------------------|
-| `make spec-init` | `.\scripts\operator.ps1 init-spec` |
-| `make validate-spec` | `.\scripts\operator.ps1 validate-spec` |
-| `make servers-deploy` | `.\scripts\operator.ps1 deploy-servers` |
-| `make servers-report` | `.\scripts\operator.ps1 report-servers` |
-| `make servers-destroy` | `.\scripts\operator.ps1 destroy-servers` |
-| `make build-ovas` | `.\scripts\operator.ps1 build-ovas` |
-| `make guide-validate` | `.\scripts\operator.ps1 guide-validate` |
-| `make e2e` | `.\scripts\operator.ps1 e2e` |
+| Command | Description |
+|---------|-------------|
+| `.\scripts\operator.ps1 init-spec` | Discover vSphere and initialize spec.yaml |
+| `.\scripts\operator.ps1 validate-spec` | Validate spec.yaml configuration |
+| `.\scripts\operator.ps1 deploy-servers` | Deploy Satellite, Capsule, and Tester VMs |
+| `.\scripts\operator.ps1 report-servers` | Report VM status and DHCP IPs |
+| `.\scripts\operator.ps1 destroy-servers` | Destroy all deployed VMs |
+| `.\scripts\operator.ps1 e2e` | Run full E2E test suite |
 
 ---
 
-## Appendix B: Testing/Validation Only - Windows 11 VM in vSphere
+## Kickstart Files
 
-> **WARNING**: This section describes an **optional testing harness** for CI-like validation. It is **NOT** part of the production operator workflow. The primary workflow uses a Windows 11 laptop directly.
+| Kickstart | Server Type | Description |
+|-----------|-------------|-------------|
+| `ks-satellite.cfg` | Satellite | Multi-disk layout for OS, PostgreSQL, Pulp |
+| `ks-capsule.cfg` | Capsule | Multi-disk layout for OS, Pulp import/content |
+| `ks-rhel8-host.cfg` | Tester | RHEL 8.10 managed host |
+| `ks-rhel9-host.cfg` | Tester | RHEL 9.6 managed host |
 
-For automated testing environments, you can run the operator commands from a Windows 11 VM deployed in vSphere. This is useful for:
-- CI/CD pipeline integration
-- Automated regression testing
-- Isolated test environments
+---
 
-### Test Harness Location
+## Scripts Reference
 
-```
-tests/windows-vsphere-operator/
-  run.ps1           # Test harness entry script
-  README.md         # Test harness documentation
-```
+### Satellite Scripts (`scripts/satellite/`)
 
-### Running the Test Harness
-
-```powershell
-# From the project root
-.\tests\windows-vsphere-operator\run.ps1
-
-# Or with specific options
-.\tests\windows-vsphere-operator\run.ps1 -VMName "test-operator-vm" -SkipVMDeploy
-```
-
-### Test Harness Artifacts
-
-Test results are written to: `automation/artifacts/windows-vsphere-test/`
+| Script | Purpose |
+|--------|---------|
+| `satellite-install.sh` | Install and configure Satellite server |
+| `satellite-configure-content.sh` | Enable repos, create Content Views, sync |
+| `satellite-export-bundle.sh` | Export Content Views as transfer bundle |
+| `capsule-import-bundle.sh` | Import bundle into Capsule |
 
 ---
 
 ## Troubleshooting
 
-### Kickstart Installation Fails
-- Verify kickstart ISO has OEMDRV volume label
-- Verify both ISOs are attached to VM
-- Check vSphere console for boot errors
+### Satellite Installation Fails
 
-### Repository Service Not Accessible
-- Check service: `ssh admin@<ip> "systemctl --user -M rpmops@ status airgap-rpm-publisher.service"`
-- Check firewall: `ssh admin@<ip> "sudo firewall-cmd --list-ports"`
+```bash
+# Check Satellite installer logs
+sudo tail -f /var/log/foreman-installer/satellite.log
 
-### PowerCLI Connection Fails
-- Verify VMWARE_USER and VMWARE_PASSWORD environment variables
-- Check vCenter/ESXi accessibility: `Test-NetConnection vcenter.example.local -Port 443`
-- Verify PowerCLI is installed: `Get-Module -ListAvailable VMware.PowerCLI`
+# Verify subscription
+sudo subscription-manager status
+```
 
-### ISO Upload Fails
-- Verify datastore has sufficient space
-- Check datastore permissions for the user
-- Verify ISO path in spec.yaml is correct
+### Content Sync Fails
+
+```bash
+# Check sync status
+hammer sync-plan list --organization "Default Organization"
+hammer task list --search "label ~ sync"
+
+# Check Pulp logs
+sudo tail -f /var/log/messages | grep pulp
+```
+
+### Capsule Import Fails
+
+```bash
+# Verify bundle checksum
+sha256sum -c bundle.tar.gz.sha256
+
+# Check import logs
+sudo tail -f /var/log/capsule-setup/import.log
+```
+
+### Managed Host Cannot Access Capsule
+
+```bash
+# Verify CA certificate
+openssl s_client -connect capsule-internal:443 -CAfile /etc/pki/tls/certs/capsule-ca.crt
+
+# Check firewall
+sudo firewall-cmd --list-all
+
+# Verify repo configuration
+cat /etc/yum.repos.d/capsule-*.repo
+```
+
+---
+
+## Appendix A: Linux/macOS Operators
+
+For operators on Linux or macOS:
+
+```bash
+# Install PowerShell Core
+# RHEL: sudo dnf install -y powershell
+# Ubuntu: sudo apt-get install -y powershell
+# macOS: brew install powershell
+
+# Use same operator commands
+pwsh scripts/operator.ps1 validate-spec
+pwsh scripts/operator.ps1 deploy-servers
+```
+
+---
+
+## Appendix B: Evidence Collection
+
+Evidence for compliance is collected in `automation/artifacts/e2e-satellite-proof/`:
+
+```
+automation/artifacts/e2e-satellite-proof/
+├── satellite/
+│   ├── cv-versions.txt
+│   ├── sync-status.txt
+│   └── export-manifest.json
+├── capsule/
+│   ├── import-report.txt
+│   └── content-listing.txt
+├── testers/
+│   ├── rhel8/
+│   │   ├── pre-patch-packages.txt
+│   │   ├── post-patch-packages.txt
+│   │   ├── uname-r.txt
+│   │   └── os-release.txt
+│   └── rhel9/
+│       ├── pre-patch-packages.txt
+│       ├── post-patch-packages.txt
+│       ├── uname-r.txt
+│       └── os-release.txt
+└── README.txt
+```
