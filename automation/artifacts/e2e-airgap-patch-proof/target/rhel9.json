@@ -1,0 +1,11 @@
+{
+  "name": "rhel9-6-tester",
+  "ip": "192.168.1.117",
+  "user": "dev1",
+  "power": "PoweredOn",
+  "guest": "Red Hat Enterprise Linux 9 (64-bit)",
+  "ssh_validated": true,
+  "hostname": "syn-2603-800c-1e00-56d0-0000-0000-0000-1062.res6.spectrum.com",
+  "release": "Red Hat Enterprise Linux release 9.6 (Plow)",
+  "timestamp": "2025-12-31T07:19:38Z"
+}

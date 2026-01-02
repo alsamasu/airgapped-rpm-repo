@@ -1,0 +1,12 @@
+{
+  "vm_name": "windows11-test",
+  "ip": "192.168.1.171",
+  "ssh_user": "dev",
+  "selection_method": "reuse_existing",
+  "source": "automation/artifacts/windows-operator/operator-vm.json",
+  "power_state": "PoweredOn",
+  "ssh_reachable": true,
+  "ssh_via": "binhex-tools",
+  "selection_timestamp": "2025-12-31T05:45:00Z",
+  "proof_run_id": "windows-proof-20251231"
+}

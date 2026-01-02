@@ -1,0 +1,10 @@
+{
+  "name": "rpm-internal",
+  "ip": "192.168.1.193",
+  "user": "admin",
+  "ssh_validated": true,
+  "hostname": "rpm-internal",
+  "os": "Red Hat Enterprise Linux release 9.6 (Plow)",
+  "role": "internal_repo_server",
+  "deployed_at": "2025-12-31T08:20:00Z"
+}

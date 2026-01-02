@@ -1,0 +1,13 @@
+{
+  "vm_name": "windows11-test",
+  "moid": "vm-121",
+  "ip": "192.168.1.171",
+  "hostname": "DEV1-8CN1VU29LV",
+  "ssh_user": "dev",
+  "selected_method": "existing",
+  "os_reported": "Microsoft Windows 10 (64-bit)",
+  "power_state": "PoweredOn",
+  "selection_timestamp": "2025-12-31T05:05:00+00:00",
+  "ssh_reachable": true,
+  "ssh_via": "binhex-tools"
+}

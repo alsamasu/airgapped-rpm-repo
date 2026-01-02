@@ -1,0 +1,162 @@
+{
+  "generated": "2025-12-31T18:45:00Z",
+  "test_type": "REAL_E2E_CDN",
+  "description": "Real E2E airgapped patch test using Red Hat CDN (not DVD simulation)",
+  "phases": {
+    "phase1_identify_machines": {
+      "status": "PASS",
+      "steps": {
+        "query_vsphere": "PASS",
+        "validate_windows_ssh": "PASS",
+        "validate_rhel8_ssh": "PASS",
+        "validate_rhel9_ssh": "PASS"
+      },
+      "evidence": ["target/windows.json", "target/rhel8.json", "target/rhel9.json"]
+    },
+    "phase2_stage_dependencies": {
+      "status": "PASS",
+      "steps": {
+        "verify_airgapped_deps_zip": "PASS",
+        "checksums_490_ok": "PASS",
+        "install_deps_ps1": "PASS",
+        "stage_repo_zip": "PASS"
+      },
+      "evidence": ["windows/deps/install.log"]
+    },
+    "phase3_deploy_servers": {
+      "status": "PASS",
+      "defect_001_resolution": "RESOLVED",
+      "steps": {
+        "generate_kickstart_isos": "PASS",
+        "embed_ks_parameters": "PASS",
+        "create_vms": "PASS",
+        "kickstart_installation": "PASS"
+      },
+      "resolution": "Created custom boot ISOs with embedded kickstart parameters (inst.ks=... baked into ISO)",
+      "evidence": ["target/external.json", "target/internal.json"]
+    },
+    "phase4_repo_discovery": {
+      "status": "PASS",
+      "steps": {
+        "collect_rhel8_repos": "PASS",
+        "collect_rhel9_repos": "PASS",
+        "verify_testers_unregistered": "PASS"
+      },
+      "evidence": [
+        "workflow/01_repo_discovery/rhel8_discovery.log",
+        "workflow/01_repo_discovery/rhel9_discovery.log"
+      ],
+      "findings": {
+        "rhel8_tester": {
+          "ip": "192.168.1.87",
+          "packages_installed": 635,
+          "subscription_status": "not_registered"
+        },
+        "rhel9_tester": {
+          "ip": "192.168.1.117",
+          "packages_installed": 693,
+          "subscription_status": "not_registered"
+        }
+      }
+    },
+    "phase5_external_bundle": {
+      "status": "PASS",
+      "source": "RED_HAT_CDN",
+      "steps": {
+        "subscription_manager_register": "PASS",
+        "enable_repos": "PASS",
+        "check_security_updates": "PASS",
+        "download_security_packages": "PASS",
+        "generate_manifest": "PASS"
+      },
+      "evidence": [
+        "workflow/02_external_bundle_build/01_registration.log",
+        "workflow/02_external_bundle_build/02_available_repos.log",
+        "workflow/02_external_bundle_build/03_enable_repos.log",
+        "workflow/02_external_bundle_build/04_security_updates.log",
+        "workflow/02_external_bundle_build/05_download_packages.log",
+        "workflow/02_external_bundle_build/06_bundle_manifest.log",
+        "workflow/02_external_bundle_build/manifest.txt"
+      ],
+      "registration": {
+        "system_id": "b5977c09-3936-4807-a528-4b20bedf6b1d",
+        "org_id": "12043377"
+      },
+      "bundle": {
+        "package_count": 90,
+        "total_size_mb": 154,
+        "location": "http://192.168.1.22/bundle/packages/",
+        "key_packages": [
+          "kernel-5.14.0-611.16.1.el9_7",
+          "glibc-2.34-231.el9_7.2",
+          "openssl-3.5.1-4.el9_7",
+          "httpd-2.4.62-7.el9_7.3",
+          "openssh-8.7p1-47.el9_7",
+          "systemd-252-55.el9_7.7",
+          "python3-3.9.25-2.el9_7"
+        ],
+        "security_advisories": [
+          "RHSA-2025:23241 (kernel - Important)",
+          "RHSA-2025:22175 (expat - Important)",
+          "RHSA-2025:23919 (httpd - Important)",
+          "RHSA-2025:23343 (binutils - Moderate)",
+          "RHSA-2025:20532 (grub2 - Moderate)"
+        ]
+      }
+    },
+    "phase6_internal_import": {
+      "status": "BLOCKED",
+      "blocker": "SSH_AUTH_FAILURE",
+      "steps": {
+        "transfer_bundle_to_internal": "BLOCKED",
+        "verify_checksums": "BLOCKED",
+        "create_repo_metadata": "BLOCKED",
+        "enable_https": "BLOCKED"
+      },
+      "notes": "SSH authentication failing from container (172.20.0.x) to VMs (192.168.1.x). Bundle ready at http://192.168.1.22/bundle/packages/"
+    },
+    "phase7_ansible_patch": {
+      "status": "BLOCKED",
+      "blocker": "DEPENDS_ON_PHASE6",
+      "steps": {
+        "configure_tester_repos": "BLOCKED",
+        "apply_security_updates": "BLOCKED",
+        "reboot_testers": "BLOCKED",
+        "verify_no_outstanding_advisories": "BLOCKED"
+      }
+    },
+    "phase8_final": {
+      "status": "PARTIAL",
+      "summary": "External bundle build COMPLETE with real Red Hat CDN content. Import/patch phases BLOCKED by SSH auth."
+    }
+  },
+  "overall_status": "PARTIAL",
+  "completion_percentage": 62,
+  "blockers": [
+    {
+      "id": "SSH_AUTH_BLOCKER",
+      "description": "SSH password authentication rejected from container environment to VMs",
+      "affected_phases": ["phase6", "phase7"],
+      "workaround": "Run remaining phases from Windows operator (192.168.1.171) with direct VM access"
+    }
+  ],
+  "accomplishments": [
+    "External server registered with Red Hat subscription-manager",
+    "90 security update packages downloaded from Red Hat CDN (154 MB)",
+    "Bundle manifest generated with package list",
+    "Security advisories identified (Important: kernel, expat, httpd)",
+    "DEFECT-001 resolved with custom boot ISOs"
+  ],
+  "machines": {
+    "operator": {"name": "windows11-test", "ip": "192.168.1.171", "role": "Ansible controller"},
+    "rpm_external": {"name": "rpm-external", "ip": "192.168.1.22", "role": "Connected to Red Hat CDN"},
+    "rpm_internal": {"name": "rpm-internal", "ip": "192.168.1.193", "role": "Airgapped repo server"},
+    "tester_rhel8": {"name": "rhel8-10-tester", "ip": "192.168.1.87", "role": "Target for patches"},
+    "tester_rhel9": {"name": "rhel9-6-tester", "ip": "192.168.1.117", "role": "Target for patches"}
+  },
+  "rhel8_limitation": {
+    "status": "LIMITATION",
+    "description": "subscription-manager on RHEL 9 cannot download RHEL 8 packages",
+    "impact": "RHEL 8 tester patching requires separate RHEL 8 external server or manual package sourcing"
+  }
+}

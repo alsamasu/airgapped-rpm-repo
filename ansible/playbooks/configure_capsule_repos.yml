@@ -1,0 +1,161 @@
+---
+# ansible/playbooks/configure_capsule_repos.yml
+# Configure managed hosts to use internal Capsule for content
+#
+# Usage:
+#   ansible-playbook playbooks/configure_capsule_repos.yml
+#   ansible-playbook playbooks/configure_capsule_repos.yml --limit rhel9_hosts
+#
+# This playbook:
+#   1. Removes existing Red Hat repos
+#   2. Configures yum/dnf to use internal Capsule
+#   3. Trusts Capsule TLS certificate
+#   4. Verifies repository connectivity
+
+- name: Configure hosts to use internal Capsule
+  hosts: managed_hosts
+  gather_facts: true
+  become: true
+
+  vars:
+    # Capsule server configuration
+    capsule_fqdn: "{{ capsule_hostname | default('capsule-internal') }}"
+    capsule_port: "{{ capsule_https_port | default(443) }}"
+    capsule_url: "https://{{ capsule_fqdn }}:{{ capsule_port }}"
+
+    # Content paths based on OS
+    rhel8_content_path: "/pulp/content/Default_Organization/prod/cv_rhel8_security/custom"
+    rhel9_content_path: "/pulp/content/Default_Organization/prod/cv_rhel9_security/custom"
+
+    # Repository configuration
+    repo_gpgcheck: true
+    repo_sslverify: true
+
+  tasks:
+    - name: Gather OS facts
+      ansible.builtin.setup:
+        filter: ansible_distribution*
+
+    - name: Display target OS information
+      ansible.builtin.debug:
+        msg: "Configuring {{ ansible_distribution }} {{ ansible_distribution_major_version }} ({{ inventory_hostname }})"
+
+    - name: Backup existing repo configuration
+      ansible.builtin.archive:
+        path: /etc/yum.repos.d/
+        dest: "/root/yum-repos-backup-{{ ansible_date_time.date }}.tar.gz"
+        format: gz
+      ignore_errors: true
+
+    - name: Remove Red Hat subscription manager repos
+      ansible.builtin.file:
+        path: /etc/yum.repos.d/redhat.repo
+        state: absent
+      when: not keep_redhat_repos | default(false)
+
+    # Configure RHEL 8 hosts
+    - name: Configure RHEL 8 repositories
+      when: ansible_distribution_major_version == "8"
+      block:
+        - name: Create RHEL 8 BaseOS repository file
+          ansible.builtin.copy:
+            content: |
+              [capsule-rhel8-baseos]
+              name=Capsule RHEL 8 BaseOS
+              baseurl={{ capsule_url }}{{ rhel8_content_path }}/Red_Hat_Enterprise_Linux_8_for_x86_64_-_BaseOS_RPMs_8_10/
+              enabled=1
+              gpgcheck={{ 1 if repo_gpgcheck else 0 }}
+              sslverify={{ 1 if repo_sslverify else 0 }}
+              sslcacert=/etc/pki/tls/certs/capsule-ca.crt
+            dest: /etc/yum.repos.d/capsule-rhel8-baseos.repo
+            mode: '0644'
+            owner: root
+            group: root
+
+        - name: Create RHEL 8 AppStream repository file
+          ansible.builtin.copy:
+            content: |
+              [capsule-rhel8-appstream]
+              name=Capsule RHEL 8 AppStream
+              baseurl={{ capsule_url }}{{ rhel8_content_path }}/Red_Hat_Enterprise_Linux_8_for_x86_64_-_AppStream_RPMs_8_10/
+              enabled=1
+              gpgcheck={{ 1 if repo_gpgcheck else 0 }}
+              sslverify={{ 1 if repo_sslverify else 0 }}
+              sslcacert=/etc/pki/tls/certs/capsule-ca.crt
+            dest: /etc/yum.repos.d/capsule-rhel8-appstream.repo
+            mode: '0644'
+            owner: root
+            group: root
+
+    # Configure RHEL 9 hosts
+    - name: Configure RHEL 9 repositories
+      when: ansible_distribution_major_version == "9"
+      block:
+        - name: Create RHEL 9 BaseOS repository file
+          ansible.builtin.copy:
+            content: |
+              [capsule-rhel9-baseos]
+              name=Capsule RHEL 9 BaseOS
+              baseurl={{ capsule_url }}{{ rhel9_content_path }}/Red_Hat_Enterprise_Linux_9_for_x86_64_-_BaseOS_RPMs_9_6/
+              enabled=1
+              gpgcheck={{ 1 if repo_gpgcheck else 0 }}
+              sslverify={{ 1 if repo_sslverify else 0 }}
+              sslcacert=/etc/pki/tls/certs/capsule-ca.crt
+            dest: /etc/yum.repos.d/capsule-rhel9-baseos.repo
+            mode: '0644'
+            owner: root
+            group: root
+
+        - name: Create RHEL 9 AppStream repository file
+          ansible.builtin.copy:
+            content: |
+              [capsule-rhel9-appstream]
+              name=Capsule RHEL 9 AppStream
+              baseurl={{ capsule_url }}{{ rhel9_content_path }}/Red_Hat_Enterprise_Linux_9_for_x86_64_-_AppStream_RPMs_9_6/
+              enabled=1
+              gpgcheck={{ 1 if repo_gpgcheck else 0 }}
+              sslverify={{ 1 if repo_sslverify else 0 }}
+              sslcacert=/etc/pki/tls/certs/capsule-ca.crt
+            dest: /etc/yum.repos.d/capsule-rhel9-appstream.repo
+            mode: '0644'
+            owner: root
+            group: root
+
+    # Trust Capsule CA certificate
+    - name: Copy Capsule CA certificate
+      ansible.builtin.copy:
+        src: "{{ capsule_ca_cert_path | default('files/capsule-ca.crt') }}"
+        dest: /etc/pki/tls/certs/capsule-ca.crt
+        mode: '0644'
+        owner: root
+        group: root
+      when: capsule_ca_cert_path is defined or lookup('file', 'files/capsule-ca.crt', errors='ignore')
+
+    - name: Update CA trust store
+      ansible.builtin.command: update-ca-trust extract
+      changed_when: true
+      when: capsule_ca_cert_path is defined
+
+    # Clean and verify
+    - name: Clean dnf cache
+      ansible.builtin.command: dnf clean all
+      changed_when: true
+
+    - name: Verify repository connectivity
+      ansible.builtin.command: dnf repolist
+      register: repolist_result
+      changed_when: false
+
+    - name: Display repository list
+      ansible.builtin.debug:
+        var: repolist_result.stdout_lines
+
+    - name: Test package metadata access
+      ansible.builtin.command: dnf check-update
+      register: check_update
+      failed_when: check_update.rc not in [0, 100]
+      changed_when: false
+
+    - name: Repository configuration complete
+      ansible.builtin.debug:
+        msg: "Host {{ inventory_hostname }} configured to use Capsule at {{ capsule_url }}"

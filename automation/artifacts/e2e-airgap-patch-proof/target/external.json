@@ -1,0 +1,10 @@
+{
+  "name": "rpm-external",
+  "ip": "192.168.1.22",
+  "user": "admin",
+  "ssh_validated": true,
+  "hostname": "rpm-external",
+  "os": "Red Hat Enterprise Linux release 9.6 (Plow)",
+  "role": "external_repo_server",
+  "deployed_at": "2025-12-31T08:20:00Z"
+}

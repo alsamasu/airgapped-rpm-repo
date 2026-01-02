@@ -1,0 +1,9 @@
+{
+  "spec_path": "C:\\src\\airgapped-rpm-repo\\config\\spec.yaml",
+  "command": "validate-spec",
+  "timestamp": "2025-12-31T05:44:46.0184015+00:00",
+  "status": "SUCCESS",
+  "results": {
+    "validation": "passed"
+  }
+}

@@ -120,3 +120,5 @@ output/
 
 # Keep PowerCLI lib directory
 !automation/powercli/lib/
+# Large binary files
+*.iso

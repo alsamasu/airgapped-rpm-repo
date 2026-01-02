@@ -1,0 +1,10 @@
+{
+  "name": "windows11-test",
+  "ip": "192.168.1.171",
+  "user": "dev",
+  "power": "PoweredOn",
+  "guest": "Microsoft Windows 10 (64-bit)",
+  "ssh_validated": true,
+  "hostname": "DEV1-8CN1VU29LV",
+  "timestamp": "2025-12-31T07:19:09Z"
+}

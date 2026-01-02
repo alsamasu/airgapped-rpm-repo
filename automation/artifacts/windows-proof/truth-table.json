@@ -1,0 +1,71 @@
+{
+  "proof_run_id": "windows-proof-20251231",
+  "target": {
+    "vm_name": "windows11-test",
+    "ip": "192.168.1.171",
+    "os": "Windows 11",
+    "ssh_via": "binhex-tools"
+  },
+  "prerequisites": {
+    "powershell_7": {"status": "PASSED", "version": "7.5.4"},
+    "vmware_powercli": {"status": "PASSED", "version": "13.3.0"},
+    "forbidden_tools_checked": false,
+    "note": "Python, powershell-yaml, Windows ADK, WSL NOT checked per guardrails"
+  },
+  "commands": [
+    {
+      "command": "operator.ps1 validate-spec",
+      "status": "PASSED",
+      "exit_code": 0,
+      "evidence": "automation/artifacts/windows-proof/logs/validate-spec.log",
+      "notes": "Required bug fix in validate-spec.ps1 (${Path} interpolation)"
+    },
+    {
+      "command": "operator.ps1 deploy-servers -WhatIf",
+      "status": "PASSED",
+      "exit_code": 0,
+      "evidence": "automation/artifacts/windows-proof/logs/deploy-servers.log",
+      "notes": "WhatIf mode - prerequisites validated, would deploy"
+    },
+    {
+      "command": "operator.ps1 report-servers -WhatIf",
+      "status": "BLOCKED",
+      "exit_code": null,
+      "evidence": "automation/artifacts/windows-proof/logs/report-servers.log",
+      "notes": "Timeout - requires vCenter connectivity for VM enumeration"
+    },
+    {
+      "command": "operator.ps1 guide-validate",
+      "status": "PASSED",
+      "exit_code": 0,
+      "evidence": "automation/artifacts/windows-proof/logs/guide-validate.log",
+      "notes": "Guide validation passed"
+    },
+    {
+      "command": "operator.ps1 e2e -WhatIf",
+      "status": "PASSED",
+      "exit_code": 0,
+      "evidence": "automation/artifacts/windows-proof/logs/e2e.log",
+      "notes": "E2E summary: 2 passed, 0 failed"
+    }
+  ],
+  "artifacts_validated": [
+    {"path": "automation/artifacts/windows-proof/logs/validate-spec.log", "size": 2230, "exists": true},
+    {"path": "automation/artifacts/windows-proof/logs/deploy-servers.log", "size": 916, "exists": true},
+    {"path": "automation/artifacts/windows-proof/logs/guide-validate.log", "size": 922, "exists": true},
+    {"path": "automation/artifacts/windows-proof/logs/e2e.log", "size": 3477, "exists": true},
+    {"path": "automation/artifacts/windows-proof/operator/report.json", "size": 229, "exists": true},
+    {"path": "automation/artifacts/windows-proof/operator/run.log", "size": 317, "exists": true}
+  ],
+  "bug_fixed": {
+    "file": "automation/powercli/validate-spec.ps1",
+    "issue": "PowerShell variable interpolation: $Path: interpreted as scope prefix",
+    "fix": "Changed $Path: to ${Path}: on lines 99 and 118"
+  },
+  "summary": {
+    "total_commands": 5,
+    "passed": 4,
+    "failed": 0,
+    "blocked": 1
+  }
+}
